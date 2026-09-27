@@ -1,0 +1,42 @@
+src/layout.rs
+  s_e608024ebbef33::t_c714467a92e14c 122-124,179-180,183-184,223-225,849-859,887,892-900,942
+.claude/skills/infographic/SKILL.md
+  s_e608024ebbef33::t_8ec3c788346237 78,82,105-116
+src/spec.rs
+  s_e608024ebbef33::t_1f321d9fe583ad 380-381,383-387,395,400-404
+  s_e608024ebbef33::t_0f2b1d7d72cafc 109-110,135-140,169-193,218-219,382,388-390,398-399,405-406,561-569
+  s_e608024ebbef33::t_a03619fd752061 570
+examples/tcp-segment-labels.yaml
+  s_e608024ebbef33::t_1f321d9fe583ad 1-28
+src/timeline.rs
+  s_e608024ebbef33::t_1f321d9fe583ad 268-272,323-328,590-640
+  s_e608024ebbef33::t_bf8ae36c33f542 384-385
+  s_e608024ebbef33::t_5a385ed0db3200 41-42,201-203,244-246,257,265,273-274
+  s_e608024ebbef33::t_ecaacc38365997 386,391
+  s_e608024ebbef33::t_73079205b14aef 641
+examples/retry-backoff-timing.yaml
+  s_e608024ebbef33::t_1f321d9fe583ad 1-27
+src/emit.rs
+  s_e608024ebbef33::t_1f321d9fe583ad 194-200
+  s_e608024ebbef33::t_4994a5d77a1b3c 380-382
+  s_e608024ebbef33::t_03e5cfcd74d04b 7-8,163-184,188-189,192-193,201-203,223-224,229-244
+src/check/geometry.rs
+  s_e608024ebbef33::t_1f321d9fe583ad 192-195,282-285
+  s_e608024ebbef33::t_7a4019668a98ed 185-191,196-197
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c3f4b501d7b2df23beef28e2b065c1a2fdf07eb3",
+  "prompts": {},
+  "sessions": {
+    "s_e608024ebbef33": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e07cfebe-214e-42bb-a8d2-dbbf1a2f359c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Graham Brooks <graham@grahambrooks.com>"
+    }
+  }
+}
