@@ -1,0 +1,53 @@
+title: How infographic works
+story:
+  takeaway: Claude writes a YAML spec; the CLI draws, checks and reports until the gate passes
+  notes: >-
+    Claude never edits the SVG: every finding names a spec target and is fixed
+    in the spec. Critique of the storyboard is folded into the build rounds.
+    Browser verification is run by verify.mjs (Playwright), not yet by the CLI
+    itself. The gate and build count reset once the result is delivered.
+nodes:
+  user:     { label: You }
+  claude:   { label: Claude, sublabel: infographic skill, counter: builds }
+  cli:      { label: infographic CLI, sublabel: layout · timeline · emit, state: gate }
+  browsers: { label: Browsers, sublabel: Chromium · Firefox · WebKit }
+edges:
+  ask:     { from: user, to: claude }
+  build:   { from: claude, to: cli }
+  report:  { from: cli, to: claude }
+  frames:  { from: cli, to: browsers }
+  seen:    { from: browsers, to: cli }
+  deliver: { from: claude, to: user }
+states:
+  gate:
+    values: [IDLE, FINDINGS, PASSED]
+    tones: { IDLE: neutral, FINDINGS: fail, PASSED: ok }
+counters:
+  builds: { label: builds, max: 3 }
+phases:
+  - name: Request
+    caption: a one-line request; Claude designs the story
+    set: { gate: IDLE, builds: 0 }
+    flows:
+      - { path: [ask], outcome: ok, rate: 1.5/s }
+  - name: Findings
+    caption: findings name spec targets; Claude fixes the spec
+    set: { gate: FINDINGS }
+    ramp: { builds: 0..2 }
+    flows:
+      - { path: [build, report], outcome: fail, count: 2 }
+  - name: Gate passes
+    caption: static gate passes and a storyboard comes back
+    set: { gate: PASSED }
+    ramp: { builds: 2..3 }
+    flows:
+      - { path: [build, report], outcome: ok, count: 1 }
+  - name: Browser check
+    caption: each engine shows what the timeline says
+    flows:
+      - { path: [frames, seen], outcome: ok, count: 3 }
+  - name: Delivered
+    caption: light and dark SVGs plus a README embed
+    set: { gate: IDLE, builds: 0 }
+    flows:
+      - { path: [ask, deliver], outcome: ok, rate: 0.7/s }
