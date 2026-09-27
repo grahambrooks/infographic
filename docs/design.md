@@ -12,24 +12,121 @@ several refinement rounds. The recurring defects were:
 - flow animations drifting off the edges they are meant to follow;
 - hover targets and tooltips misplaced relative to their elements.
 
-All three come from the same cause: **geometry is written more than once.** A
-path is drawn in one place and its motion path is copied somewhere else, a
-tooltip is positioned separately from its anchor, and a box is sized without
-measuring its text. The copies disagree, and nothing notices until a human
-looks.
+All three come from the same cause: **geometry and timing are written more than
+once.** A path is drawn in one place and its motion path is copied somewhere
+else, a tooltip is positioned separately from its anchor, and two animations
+that are meant to be in step each have their own clock. The copies disagree,
+and nothing notices until a human looks.
 
 ## Goal
 
-Claude produces an infographic that is right on the first render, or is told
-exactly what is wrong in a form it can act on. Two deliverables:
+A one-line request such as
 
-1. **`infographic`**, a Rust CLI that turns a declarative spec into SVG and
-   verifies any SVG, hand-written or generated.
-2. **A Claude Code skill** that drives the CLI through a bounded
-   spec → build → check → critique → refine loop.
+> create an infographic for the circuit breaker pattern
 
-Target subjects: software architecture, process and data flow, and GitHub
-project headers.
+produces a finished, animated infographic that shows the pattern's traffic
+flow, built from Claude's own knowledge of the subject, with no further input
+needed. Refinement is an optional follow-up ("make the failures start sooner"),
+not a required round.
+
+Two deliverables, split by who does what:
+
+| | Owns | Never does |
+|---|---|---|
+| **Skill** (`.claude/skills/infographic/`) | Understanding the subject, deciding what to show, writing the YAML spec, critiquing the result | Writing or editing SVG |
+| **`infographic` CLI** (Rust) | Layout, timing, SVG output, all verification | Deciding content |
+
+Claude designs and the tool draws. The CLI also accepts a hand-written YAML
+spec, and `check` accepts any SVG, but the main path starts from the skill.
+
+Target subjects: resilience and architecture patterns, process and data flow,
+and GitHub project headers.
+
+## Workflow
+
+```
+request ─▶ [skill] story ─▶ spec.yaml ─▶ [CLI] build + check ─▶ findings / storyboard
+                 ▲                                                     │
+                 └──────── fix the spec (≤3 rounds) ◀── critique ◀──────┘
+```
+
+1. **Story.** From its own knowledge, Claude writes down:
+   - the one takeaway;
+   - the actors;
+   - the **phases** the viewer should see, each with what changes and why.
+
+   For the circuit breaker:
+
+   | # | Phase | What the viewer sees |
+   |---|---|---|
+   | 1 | Closed, healthy | Requests flow client → breaker → service and back, all green |
+   | 2 | Service degrades | Responses turn red; the breaker's failure counter climbs to its threshold |
+   | 3 | Trips open | Requests stop at the breaker and return straight away as a fallback; nothing reaches the service; a cooldown timer runs down |
+   | 4 | Half-open | A single probe request is let through |
+   | 5 | Recovers | The probe succeeds, the breaker closes, and normal flow resumes; then the cycle loops |
+
+   The story goes into the spec's `story:` block, so it is reviewable and
+   reusable. The skill doesn't stop to ask for approval; it reports the story
+   at the end, so the user can redirect it.
+2. **Spec.** Claude turns the story into YAML: nodes, edges, state
+   indicators, flows and a phase timeline. It never writes coordinates.
+3. **Build and check.** `infographic build spec.yaml` emits both profiles and
+   runs the gates. It returns JSON findings and a **storyboard**: one frame per
+   phase, plus a contact sheet.
+4. **Fix** every finding by editing the spec, never the SVG.
+5. **Critique** the storyboard against the rubric. Does each frame show what
+   its phase claims? Would someone new to the pattern follow it? Refine, at
+   most 3 rounds in total, then deliver the files and report the story, the
+   files written, and any remaining issues.
+
+## Spec model
+
+The spec describes **what happens**, never where things go or exact
+animation timing.
+
+```yaml
+title: Circuit breaker
+story:
+  takeaway: A breaker stops a failing dependency from taking its callers down with it
+profile: [readme, interactive]
+nodes:
+  client:  { label: Client }
+  breaker: { label: Circuit breaker, state: breaker_state, counter: failures }
+  service: { label: Payment service }
+edges:
+  call:     { from: client,  to: breaker }
+  forward:  { from: breaker, to: service }
+  reply:    { from: service, to: breaker }
+  response: { from: breaker, to: client }
+states:
+  breaker_state: [CLOSED, OPEN, HALF-OPEN]
+phases:
+  - name: Closed, healthy
+    set: { breaker_state: CLOSED, failures: 0 }
+    flows:
+      - { path: [call, forward, reply, response], outcome: ok, rate: 2/s }
+  - name: Service degrades
+    flows:
+      - { path: [call, forward, reply, response], outcome: fail, rate: 2/s }
+    ramp: { failures: 0..5 }
+  - name: Trips open
+    set: { breaker_state: OPEN }
+    flows:
+      - { path: [call, response], outcome: fallback, rate: 2/s }  # short-circuited at the breaker
+    timer: { label: cooldown }
+  - name: Half-open
+    set: { breaker_state: HALF-OPEN }
+    flows:
+      - { path: [call, forward, reply, response], outcome: ok, count: 1 }
+  - name: Recovers
+    set: { breaker_state: CLOSED, failures: 0 }
+    flows:
+      - { path: [call, forward, reply, response], outcome: ok, rate: 2/s }
+```
+
+Illustrative only; the exact schema will be settled while building milestone 1.
+`outcome` maps to semantic colours in the theme, and phase durations come from
+the flows they contain, unless the spec overrides them.
 
 ## Constraint that shapes everything: embedding mode
 
@@ -46,57 +143,73 @@ installed Google Chrome:
 | CSS `:hover` | **no** | **no** | **no** | works |
 | `@media (prefers-color-scheme)` inside the SVG | works | works | **no** | works |
 
-This settles an earlier conflict in the research: CSS animation does run inside
-`<img>` in current Chromium. It gives two fixed output profiles:
+This gives two output profiles, both generated from one spec by default:
 
 - **`readme`**: animation only, with no hover, links, tooltips, scripts or
   external resources. Dark mode is delivered as **two files** chosen by
-  `<picture><source media="(prefers-color-scheme: dark)">`, never by a media
-  query inside the SVG, because WebKit/Safari ignores it in `<img>`.
-- **`interactive`**: for inlining in an HTML page, and allowed to use hover,
-  tooltips, links, step controls and in-SVG theme queries.
+  `<picture><source media="(prefers-color-scheme: dark)">`, because
+  WebKit/Safari ignores in-SVG theme queries in `<img>`. The phase is shown by
+  an on-image caption, not a control.
+- **`interactive`**: an HTML page that inlines the SVG, adding hover
+  explanations on each node and step controls (pause, previous/next phase).
 
-The spike did not go through GitHub's image proxy (camo). The proxy only
-serves the file, and the browser enforces the `<img>` restrictions, so the
-results should carry over. Confirm this once with a real README before
-relying on it.
+The spike did not go through GitHub's image proxy (camo). Confirm the results
+once with a real README before relying on them.
 
 ## Architecture
 
 One crate with directory modules (Graham's convention), pure Rust except for
-the one browser dependency justified below.
+the one browser dependency justified under Verification.
 
 ```
-spec (YAML/TOML) ──parse──▶ model ──layout──▶ Scene ──emit──▶ SVG (per profile)
-                                                │
-                                                └──▶ check (static, then dynamic)
+spec.yaml ─parse─▶ model ─layout─▶ Scene ─schedule─▶ Timeline ─emit─▶ SVG / HTML per profile
+                                     │                   │
+                                     └──── check (static, then dynamic) ◀┘
 ```
 
-### Scene is the single source of truth
+### Scene is the single source of truth for geometry
 
 Layout ends in a `Scene` of positioned primitives with stable ids: node boxes,
 edge paths, measured text runs, and groups. Every SVG construct is **derived**
 from it and never positioned independently:
 
-- **Flow animation** references the drawn edge by id, either with
-  `<animateMotion><mpath href="#e-3"/>` or with `stroke-dashoffset` on the
-  `#e-3` element itself. Path data is never copied into CSS `offset-path` or
-  into a second path, and the emitter has no code path that does so.
-- **Hover** puts shape, transparent hit area and tooltip in one `<g>`, all
-  computed from one box, and reveals the tooltip with `g:hover > .tip`.
-  Tooltip placement is chosen so that it stays inside the viewBox.
+- **Moving tokens** follow the drawn edge by id with
+  `<animateMotion><mpath href="#e-forward"/>`. Path data is never copied into
+  CSS `offset-path` or into a second path, and the emitter has no code path
+  that does so. A multi-edge flow (`path: [call, forward, …]`) is a sequence of
+  motions on the drawn edges, not one merged path.
+- **Hover** (`interactive` only) puts shape, transparent hit area and tooltip
+  in one `<g>`, all computed from one box. Tooltip placement stays inside the
+  viewBox.
 - **Text** is measured at layout time with the same font file that the SVG
-  names and the renderer loads. Labels are real `<text>` elements, never
-  `<foreignObject>`, which SVG-only consumers drop silently (learned on
-  `mmd`).
+  names and the renderer loads. Every state label (`CLOSED`/`OPEN`/…) and
+  counter value is measured, so the box fits the widest. Labels are real
+  `<text>` elements, never `<foreignObject>`, which SVG-only consumers drop
+  silently (learned on `mmd`).
 
-Layout is tested on `Scene` geometry, not by matching SVG strings. This is the
-same pattern as `mmd` and `puml`.
+### Timeline is the single source of truth for timing
+
+Scheduling turns phases into a `Timeline`, with absolute start and end times
+within one cycle of length *T*. **Every animated element has `dur` = *T* and
+`repeatCount="indefinite"`, and places its motion through `keyTimes` inside
+that cycle.** Nothing has its own clock, so states, counters, tokens and
+captions can't drift apart, however many times the loop repeats. This applies
+the Scene principle to time.
+
+- State changes and counter steps are `<set>`/discrete `<animate>` on the
+  visibility of pre-measured text alternatives. This works in `<img>`.
+- The `interactive` step controls drive the same timeline through
+  `pauseAnimations()`/`setCurrentTime()`, so they need no second animation
+  system.
+
+Layout and scheduling are tested on `Scene`/`Timeline` data, not by matching
+SVG strings. This is the same pattern as `mmd` and `puml`.
 
 ### Candidate crates (to be confirmed while building)
 
 | Role | Crate |
 |---|---|
+| Spec parsing | a maintained serde YAML crate (`serde_yaml` is unmaintained; pick one in milestone 1) |
 | Layered graph layout | `rust-sugiyama` (positions only; own orthogonal edge router) |
 | Panel and header layout | `taffy` |
 | Text measurement | `parley` or `cosmic-text` |
@@ -107,27 +220,33 @@ same pattern as `mmd` and `puml`.
 
 ## Verification
 
-`infographic check <file.svg> --profile readme|interactive` runs on **any**
-SVG, including hand-written ones, and reports findings as JSON (for Claude)
-plus a contact-sheet PNG (for Claude and humans to look at).
+`build` runs these checks automatically. `infographic check <file.svg>
+--profile readme|interactive` runs them on any SVG, including hand-written
+ones. Findings come out as JSON that refers to **spec names** (`edge
+forward`, `phase 3`) wherever the SVG came from a spec, so Claude can fix the
+spec directly.
 
 ### Static gate: pure Rust, always runs
 
+- **Spec validation**:
+  - references resolve;
+  - every flow `path` is a connected chain of edges;
+  - state values are declared;
+  - no phase is empty.
 - The SVG parses with usvg without warnings.
 - **Profile lint**:
-  - `readme`: fail on `:hover`, `<script>`, `<a>`, `<title>` used as a
-    tooltip, `<foreignObject>`, external `href`/`url()`, or
-    `prefers-color-scheme` inside the SVG.
-  - Both profiles: every internal `href`/`url(#…)`/`begin="id.event"`
-    resolves.
+  - `readme`: fail on `:hover`, `<script>`, `<a>`, `<foreignObject>`, external
+    `href`/`url()`, or `prefers-color-scheme` inside the SVG.
+  - Both profiles: every internal `href`/`url(#…)`/`begin` reference resolves;
+    every animation's `dur` equals the timeline cycle.
 - **Geometry**, from usvg element boxes:
-  - text stays inside its container;
-  - sibling boxes don't overlap;
-  - nothing extends past the viewBox.
+  - text inside its container, including every state alternative;
+  - no overlapping siblings;
+  - nothing outside the viewBox.
 - **Contrast**: WCAG ratio of each text fill against the pixels rendered
   behind it. axe-core ignores SVG text, so this has to be implemented here.
-- **Render**: resvg PNG with pinned fonts, which is deterministic and so can
-  be snapshot-tested.
+- **Render**: resvg PNG with pinned fonts, which is deterministic and so can be
+  snapshot-tested.
 
 ### Dynamic gate: browser, only when the SVG animates or has hover
 
@@ -136,69 +255,87 @@ unavoidable here. **Recorded exception to the pure-Rust preference**, kept
 narrow:
 
 - It uses `chromiumoxide` against the user's installed Chrome, with no Node.
-- It runs only if the SVG contains animation or hover rules.
 - If no Chrome is found, the gate reports **unavailable**, never passed.
-- For animation:
-  - pause, then seek to N timestamps (`pauseAnimations()` +
-    `setCurrentTime()` for SMIL, `getAnimations()` for CSS);
-  - check each moving element's distance to its path;
-  - add the frames to the contact sheet.
-- For `interactive`: force `:hover` on each group, then check that the
-  tooltip stays in the viewBox, doesn't cover its anchor, and that its hit
-  area covers the visible shape.
+- **Storyboard**: pause, then seek to the midpoint of each phase. Screenshot
+  it, and check that the visible state label and counter match the values the
+  phase declares.
+- **Token alignment**: sample moving tokens at N timestamps and check each one
+  is on its edge.
+- **Hover** (`interactive`): force `:hover` on each group, then check that the
+  tooltip stays in the viewBox and that its hit area covers the visible shape.
 
-The engine differences found by the spike are handled as **static lint rules**,
-so per-build runs don't need WebKit or Firefox. Playwright stays in
-`spikes/` for occasional cross-engine confirmation.
+The engine differences found by the spike are handled as static lint rules,
+so per-build runs don't need WebKit or Firefox. Playwright stays in `spikes/`
+for occasional cross-engine confirmation.
 
 ### Visual critique: last
 
-After the gates pass, the skill has Claude read the contact sheet and score it
-against a rubric (below). Deterministic checks come first, so the visual pass
-judges design, not bugs a machine could have found.
+Only after the gates pass does the skill read the storyboard, so the visual
+pass judges whether the design explains the subject, not bugs a machine could
+have found.
 
-## The skill
+## Skill rubric and design tokens
 
-It lives in `.claude/skills/infographic/`. The loop is:
+Drawn from prior art (`diagram-design`, Ciechanowski, ByteByteGo):
 
-1. **Decide the argument.** State one takeaway, and choose the shape that
-   mirrors it: pipeline, fan-out, cycle, boundary or layers.
-2. **Write the spec**: nodes, edges, groups, flow steps, profile and theme.
-3. **Build and check**: `infographic build spec.yaml --check`.
-4. **Fix every finding** in the spec, not by editing the SVG.
-5. **Critique the contact sheet** against the rubric, then refine. At most 3
-   rounds, then stop and report what remains.
-
-Rubric and design tokens, drawn from prior art (`diagram-design`, Ciechanowski,
-ByteByteGo):
-
-- one accent colour plus colours with fixed meanings;
-- a 4/8px grid and 2–3 type roles;
-- no shadows or decorative gradients, and low density;
-- motion only encodes flow or causality, with numbered steps and a loop of
-  10s or less;
-- motion respects `prefers-reduced-motion` (on the `interactive` profile;
-  SMIL can't be gated by it);
-- `<title>`/`<desc>` present for accessibility.
+- **Accuracy first.** The phases must be true to how the pattern really
+  behaves. For named patterns, stay with the canonical description, and put
+  any simplification in `story:`.
+- **The argument drives the shape.** Choose pipeline, fan-out, cycle, boundary
+  or layers to match the idea.
+- **Colour:**
+  - one accent colour;
+  - semantic colours for outcomes (`ok`, `fail`, `fallback`), kept the same
+    across every infographic.
+- **Layout:** a 4/8px grid, 2–3 type roles, no shadows or decorative
+  gradients, low density.
+- **Motion and captions:**
+  - motion only shows flow or causality;
+  - each phase has a numbered caption;
+  - the full cycle stays under ~20s, with each phase long enough to read its
+    caption.
+- **Accessibility:** `<title>`/`<desc>` summarise the whole story;
+  `interactive` respects `prefers-reduced-motion` by starting paused.
 
 ## Milestones
 
-1. **`check` on existing SVGs.** Static gate and contact sheet. This helps the
-   current ad-hoc workflow right away, and it fixes the quality bar before
-   any generator exists.
-2. **Dynamic gate**: animation sampling and hover forcing via chromiumoxide.
-3. **`build` for flow diagrams**: spec → layered layout → `readme` and
-   `interactive` output, with animation derived from edges.
-4. **Headers**: taffy-based banner layouts that carry a one-glance
-   architecture or flow for the project, not decoration.
-5. **The skill** wrapping 1–4, evaluated on a fixed set of example subjects.
+1. **Circuit breaker, end to end.** The skill, the spec schema, and `build`
+   for a small node/edge graph with flows, states, counters and a phase
+   timeline. Output is the `readme` profile only, with the static gate and a
+   storyboard from resvg at each phase's time. The deliberately narrow first
+   slice proves the whole loop on the motivating example.
+2. **Dynamic gate**: chromiumoxide storyboard, token-on-edge sampling.
+3. **`interactive` profile**: HTML wrapper, hover explanations, step controls,
+   hover checks.
+4. **Breadth**: a fixed evaluation set of subjects run through the skill:
+   - retry with backoff;
+   - bulkhead;
+   - transactional outbox;
+   - a CI pipeline;
+   - request lifecycle through a load balancer.
+5. **Headers**: taffy-based banner layouts that carry a one-glance
+   architecture or flow for the project.
+
+### Done when (milestone 1)
+
+- In a fresh session, "create an infographic for the circuit breaker pattern"
+  produces, **with no further input**: `circuit-breaker.yaml`,
+  `circuit-breaker.svg` and `circuit-breaker-dark.svg`.
+- The SVG shows all five phases in a loop, with tokens visibly following the
+  edges and the state label changing in step with the flow.
+- The static gate reports zero findings on the delivered files.
+- The storyboard shows the correct state, counter and flow in every phase.
+- The SVG plays when opened as `<img>` in Chrome, Firefox and WebKit (checked
+  with the `spikes/` harness).
 
 ## Out of scope (deliberately)
 
 - **Raster or AI image generation.** The output is always vector.
 - **An editor or GUI.**
-- **Scripts inside SVGs.** Interactivity is CSS/SMIL only; step controls in
-  an HTML wrapper are allowed.
+- **Claude writing or patching SVG directly** in the skill's workflow. Fixes
+  go through the spec. `check` on hand-written SVGs remains available.
+- **Scripts inside the SVG.** The `interactive` HTML wrapper may script the
+  SVG's timeline.
 - **Accepting Mermaid, D2 or PlantUML as input.** Possible later; `mmd` and
   `puml` already exist for those.
 - **Hosting a service** like capsule-render. Output is committed static files.
@@ -207,8 +344,6 @@ ByteByteGo):
 
 ## Open questions
 
-- **Spec format**: YAML or TOML. Nested graphs favour YAML, but the choice of
-  Rust YAML crate needs checking because `serde_yaml` is unmaintained.
 - **Fonts in `readme`**: whether base64-embedded `@font-face` with a subset
   font works inside `<img>` in all three engines. The `spikes/` harness can
   test this. The fallback is outlining text to paths, which loses
@@ -218,3 +353,5 @@ ByteByteGo):
 - **Optimising output**: whether `oxvg` keeps SMIL and `begin` references
   intact. Until that's known, don't optimise, and snapshot-test whatever is
   emitted.
+- **Where outputs go**: probably the current directory, with the file slug
+  taken from the title. Confirm this when the skill is written.

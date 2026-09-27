@@ -21,6 +21,12 @@ Skills and tools that make Claude reliably produce compelling, interactive SVG
 infographics: technical explainers (software architecture, processes, data
 flow) and header/banner images for GitHub project READMEs.
 
+The entry point is the skill, driven by a one-line request ("create an
+infographic for the circuit breaker pattern"). Claude designs from its own
+knowledge and writes a YAML spec; the Rust `infographic` CLI does all layout,
+timing, SVG emission and verification. Claude fixes findings in the spec, never
+in the emitted SVG.
+
 The motivating problem: ad-hoc SVG infographics have so far needed several
 rounds of refinement before they were acceptable. The project should shrink
 that loop. The known pain points, in order of how often they caused rework:
