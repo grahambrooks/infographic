@@ -1,0 +1,19 @@
+CLAUDE.md
+  s_a56911d1a432ea::t_8285f455b9d390 1-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c13a8c7e74bfcb1273b12165319a4cc6d552a5a3",
+  "prompts": {},
+  "sessions": {
+    "s_a56911d1a432ea": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b6603-74fb-496f-8088-8c53f66de28f",
+        "model": "unknown"
+      },
+      "human_author": "Graham Brooks <graham@grahambrooks.com>"
+    }
+  }
+}
