@@ -1,0 +1,32 @@
+src/build.rs
+  s_e608024ebbef33::t_aea8f82b147d4b 324-362,367,372,386,391-394,403,409-410
+  s_e608024ebbef33::t_7a47ff6e7fd226 363-366,368-371,373-385,387-390,395-402,404-408,415-421
+src/emit.rs
+  s_e608024ebbef33::t_b2b250989b56c3 321-324
+src/timeline.rs
+  s_e608024ebbef33::t_60ead6fd16a614 101-103,124,522
+  s_e608024ebbef33::t_240c142633613d 100,104-115,120-123,125-141,274-275,351,354,565
+  s_e608024ebbef33::t_b2b250989b56c3 362,393
+  s_e608024ebbef33::t_7a47ff6e7fd226 116-119,533-564
+  s_e608024ebbef33::t_9d827e49a73455 566
+src/layout.rs
+  s_e608024ebbef33::t_f13ee936eeb1d9 91-93,109,195,359-360,363-367,438-464,477,496,533,535,537-547,750
+.claude/skills/infographic/SKILL.md
+  s_e608024ebbef33::t_458f38a226ad5a 82,112-115,153-155
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a4edbb55e8b33c50a88a42414302fb1365cf27de",
+  "prompts": {},
+  "sessions": {
+    "s_e608024ebbef33": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e07cfebe-214e-42bb-a8d2-dbbf1a2f359c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Graham Brooks <graham@grahambrooks.com>"
+    }
+  }
+}
