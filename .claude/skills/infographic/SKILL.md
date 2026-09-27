@@ -124,6 +124,7 @@ phase.
 - An edge that skips a rank goes through the node in between, which is
   reported as an error. Connect adjacent components only.
 - The canvas is at most 1200px wide, so keep captions to one short clause.
+  A row fits about four components; a fifth column rarely fits.
 - One loop tells one path through the story. Alternative branches (for
   example, a failed trial that reopens a breaker) go in `story.notes`, not in
   extra phases, unless they are the point.

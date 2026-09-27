@@ -176,6 +176,15 @@ pub fn build(spec_path: &Path, out_dir: Option<&Path>, frames: bool) -> Result<R
     let opt = geometry::options();
 
     let mut outputs = Vec::new();
+    if frames {
+        // Start clean: frames left by an earlier build (e.g. one with more
+        // phases) would be compared against this build's SVG by verify.mjs.
+        let fd = dir.join(format!("{slug}.frames"));
+        if fd.exists() {
+            std::fs::remove_dir_all(&fd)?;
+        }
+        std::fs::create_dir_all(&fd)?;
+    }
     let mut rows: Vec<Vec<tiny_skia::Pixmap>> = tl.phases.iter().map(|_| Vec::new()).collect();
     for theme in THEMES {
         let svg = emit::emit(
@@ -206,7 +215,6 @@ pub fn build(spec_path: &Path, out_dir: Option<&Path>, frames: bool) -> Result<R
             let label = format!("{}, phase {} at {:.1}s", theme.name, i + 1, span.frame);
             if frames {
                 let fd = dir.join(format!("{slug}.frames"));
-                std::fs::create_dir_all(&fd)?;
                 std::fs::write(
                     fd.join(format!("{}-phase-{}.svg", theme.name, i + 1)),
                     &frame,

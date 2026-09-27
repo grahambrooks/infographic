@@ -2,49 +2,52 @@ title: TCP three-way handshake
 story:
   takeaway: SYN, SYN-ACK, ACK sync both sides' sequence numbers before any data flows
   notes: >-
-    x and y are each side's random initial sequence numbers (ISNs). Each ACK
-    acknowledges the peer's ISN + 1 because a SYN consumes one sequence number.
-    SYN and the final ACK travel on the same client-to-server edge; the segment
-    type and its numbers are carried by the phase name. Retransmission of lost
-    segments, simultaneous open and SYN cookies are not shown. The final phase
-    closes the connection so the loop can restart; the FIN/ACK teardown itself
-    is not drawn.
+    x and y are each side's initial sequence number. The close is shown as a
+    single FIN and ACK exchange; a real teardown is a four-way FIN/ACK sequence
+    with TIME_WAIT on the side that closes first, and the badges switch to
+    CLOSED/LISTEN as the exchange starts rather than as it finishes. The
+    SYN-ACK is drawn blue (outbound) because it is a new segment, not a reply
+    to data.
 nodes:
-  client: { label: Client, state: cstate, sublabel: "ISN x" }
-  server: { label: Server, state: sstate, sublabel: "ISN y" }
+  client: { label: Client, state: cstate }
+  server: { label: Server, state: sstate, sublabel: port 443 }
 edges:
   c2s: { from: client, to: server }
   s2c: { from: server, to: client }
 states:
   cstate:
-    values: [CLOSED, SYN-SENT, ESTABLISHED]
-    tones: { CLOSED: neutral, SYN-SENT: warn, ESTABLISHED: ok }
+    values: [CLOSED, SYN_SENT, ESTABLISHED]
+    tones: { CLOSED: neutral, SYN_SENT: warn, ESTABLISHED: ok }
   sstate:
-    values: [LISTEN, SYN-RCVD, ESTABLISHED]
-    tones: { LISTEN: neutral, SYN-RCVD: warn, ESTABLISHED: ok }
+    values: [LISTEN, SYN_RCVD, ESTABLISHED]
+    tones: { LISTEN: neutral, SYN_RCVD: warn, ESTABLISHED: ok }
 phases:
-  - name: SYN seq=x
-    caption: client opens at ISN x
-    set: { cstate: SYN-SENT, sstate: LISTEN }
+  - name: Listening
+    caption: server waits on a passive open
+    set: { cstate: CLOSED, sstate: LISTEN }
+    duration: 1
+  - name: SYN
+    caption: client sends SYN, seq=x
+    set: { cstate: SYN_SENT }
     flows:
       - { path: [c2s], outcome: ok, count: 1 }
-  - name: SYN-ACK seq=y ack=x+1
-    caption: server confirms x, offers y
-    set: { sstate: SYN-RCVD }
+  - name: SYN-ACK
+    caption: server replies SYN-ACK, seq=y ack=x+1
+    set: { sstate: SYN_RCVD }
     flows:
       - { path: [s2c], outcome: ok, count: 1 }
-  - name: ACK ack=y+1
-    caption: client confirms y
+  - name: ACK
+    caption: client sends ACK, ack=y+1
     set: { cstate: ESTABLISHED }
     flows:
       - { path: [c2s], outcome: ok, count: 1 }
   - name: Established
-    caption: server is open too; data flows both ways
+    caption: both sides exchange data
     set: { sstate: ESTABLISHED }
     flows:
       - { path: [c2s, s2c], outcome: ok, rate: 1/s }
   - name: Closed
-    caption: after teardown the server listens again
+    caption: FIN and ACK close it; server keeps listening
     set: { cstate: CLOSED, sstate: LISTEN }
-    duration: 2
-    flows: []
+    flows:
+      - { path: [c2s, s2c], outcome: ok, count: 1 }

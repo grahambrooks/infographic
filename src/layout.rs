@@ -701,22 +701,38 @@ pub fn layout(spec: &Spec, fonts: &Fonts) -> (Scene, Vec<Finding>) {
     .fold(0.0, f64::max);
     let width = snap(content_w + 2.0 * PAD);
     if width > MAX_WIDTH {
-        let widest = captions
+        // Name what actually sets the width, so the fix goes to the right place.
+        let widest_caption = captions
             .iter()
             .max_by(|a, b| {
                 let w = |c: &Caption| c.name.width + c.body.as_ref().map_or(0.0, |b| b.width);
                 w(a).total_cmp(&w(b))
             })
-            .map(|c| c.id.trim_start_matches("cap-").to_string());
+            .map(|c| c.id.trim_start_matches("cap-").to_string())
+            .unwrap_or_default();
+        let parts = [
+            (title.width, "the title; shorten it".to_string()),
+            (
+                takeaway.as_ref().map_or(0.0, |t| t.width),
+                "the story takeaway; shorten it".to_string(),
+            ),
+            (
+                graph_w,
+                format!(
+                    "the diagram: {n_ranks} columns of nodes; use fewer components in a row or shorter node labels"
+                ),
+            ),
+            (
+                pills_w + 16.0 + caption_w,
+                format!("the caption of phase {widest_caption}; shorten it"),
+            ),
+            (legend_w, "the legend".to_string()),
+        ];
+        let (w, cause) = parts.iter().max_by(|a, b| a.0.total_cmp(&b.0)).unwrap();
         findings.push(Finding::error(
             "layout",
             "canvas".into(),
-            format!(
-                "canvas is {width:.0}px wide (max {MAX_WIDTH:.0}); shorten the longest text{}",
-                widest
-                    .map(|n| format!(" (caption of phase {n} is the widest caption)"))
-                    .unwrap_or_default()
-            ),
+            format!("canvas is {width:.0}px wide (max {MAX_WIDTH:.0}); the widest part is {cause} ({w:.0}px)"),
         ));
     }
 

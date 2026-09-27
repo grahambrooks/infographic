@@ -1,52 +1,56 @@
 title: Retry with exponential backoff
 story:
-  takeaway: A failed call is retried after waits that double each time, giving the service room to recover
+  takeaway: Each retry waits twice as long as the last, giving a failing service room to recover
   notes: >-
-    Waits are shown by the client's badge and by phase lengths in proportion (1s, then 2s).
-    The retry counter ticks when a retry is sent, against a budget of 3. A real policy keeps
-    doubling up to a cap, gives up when the budget is spent, and adds random jitter so clients
-    don't retry in sync. Only idempotent calls should be retried.
+    Delays are a fixed 1s, 2s, 4s doubling; each phase's timer is the wait after that failure, and phase lengths are stretched to hint at the growing gap (not to scale). Real clients add random
+    jitter to each delay so retries from many clients don't arrive in sync, and
+    give up (surfacing the error) after a maximum number of attempts. Only
+    idempotent calls should be retried this way.
 nodes:
-  client:  { label: Client, sublabel: retry policy, state: delay, counter: retries }
-  service: { label: Service }
+  app:   { label: App }
+  retry: { label: Retry client, counter: failures }
+  svc:   { label: Service, state: health }
 edges:
-  call:  { from: client, to: service }
-  reply: { from: service, to: client }
+  call:   { from: app, to: retry }
+  try:    { from: retry, to: svc }
+  reply:  { from: svc, to: retry }
+  result: { from: retry, to: app }
 states:
-  delay:
-    values: [CALLING, WAIT 1s, WAIT 2s]
-    tones: { CALLING: neutral, "WAIT 1s": warn, "WAIT 2s": warn }
+  health:
+    values: [UP, DOWN]
+    tones: { UP: ok, DOWN: fail }
 counters:
-  retries: { label: retries, max: 3 }
+  failures: { label: failed attempts }
 phases:
+  - name: Normal calls
+    caption: requests succeed on the first try
+    set: { health: UP, failures: 0 }
+    flows:
+      - { path: [call, try, reply, result], outcome: ok, rate: 1/s }
   - name: Call fails
-    caption: the overloaded service returns an error
-    set: { delay: CALLING, retries: 0 }
+    caption: the service errors; wait 1s before retrying
+    set: { health: DOWN }
+    ramp: { failures: 0..1 }
+    timer: { node: retry, label: backoff 1s }
+    duration: 5.2
     flows:
-      - { path: [call, reply], outcome: fail, count: 1 }
-    duration: 2.8
-  - name: Back off 1s
-    caption: the client waits before retrying
-    set: { delay: WAIT 1s }
-    duration: 2.5
+      - { path: [call, try, reply], outcome: fail, count: 1 }
   - name: Retry 1 fails
-    caption: still overloaded, another error
-    set: { delay: CALLING, retries: 1 }
+    caption: the wait doubles to 2s
+    ramp: { failures: 1..2 }
+    timer: { node: retry, label: backoff 2s }
+    duration: 5.5
     flows:
-      - { path: [call, reply], outcome: fail, count: 1 }
-    duration: 2.8
-  - name: Back off 2s
-    caption: the wait doubles
-    set: { delay: WAIT 2s }
-    duration: 5
-  - name: Retry 2 succeeds
-    caption: the service has recovered
-    set: { delay: CALLING, retries: 2 }
+      - { path: [try, reply], outcome: fail, count: 1 }
+  - name: Retry 2 fails
+    caption: the wait doubles again to 4s
+    ramp: { failures: 2..3 }
+    timer: { node: retry, label: backoff 4s }
+    duration: 7.5
     flows:
-      - { path: [call, reply], outcome: ok, count: 1 }
-    duration: 2.8
-  - name: Reset
-    caption: success resets the retry budget
-    set: { retries: 0 }
+      - { path: [try, reply], outcome: fail, count: 1 }
+  - name: Retry 3 succeeds
+    caption: the service has recovered; the app gets its answer
+    set: { health: UP, failures: 0 }
     flows:
-      - { path: [call, reply], outcome: ok, rate: 0.8/s }
+      - { path: [try, reply, result], outcome: ok, count: 1 }

@@ -38,16 +38,20 @@ for (const theme of ['light', 'dark']) {
     const browser = await bt.launch();
     const page = await browser.newPage({ viewport: { width: Math.ceil(+w), height: Math.ceil(+h) } });
 
-    // 1. Plays inside <img>.
-    const html = path.join(dir, `.verify-${theme}.html`);
+    // 1. Plays inside <img>: poll until the picture changes, for up to one
+    // cycle, so a spec that opens with a still phase is not reported frozen.
+    const cycle = Number(svgText.match(/data-cycle="([\d.]+)"/)?.[1] ?? 10);
+    const html = path.join(dir, `.verify-${theme}-${engine}-${process.pid}.html`);
     fs.writeFileSync(html, `<!doctype html><body style="margin:0"><img src="${path.basename(svgFile)}"></body>`);
     await page.goto('file://' + path.resolve(html));
-    await page.waitForTimeout(700);
-    const a = hash(await page.screenshot());
-    await page.waitForTimeout(900);
-    const b = hash(await page.screenshot());
-    fs.unlinkSync(html);
-    const plays = a !== b;
+    await page.waitForTimeout(300);
+    const first = hash(await page.screenshot());
+    let plays = false;
+    for (let waited = 0; waited < cycle * 1000 && !plays; waited += 400) {
+      await page.waitForTimeout(400);
+      plays = hash(await page.screenshot()) !== first;
+    }
+    fs.rmSync(html, { force: true });
 
     // 2. Seek inline SVG to each frame time and compare with the timeline.
     await page.setContent(`<!doctype html><body style="margin:0">${svgText}</body>`);
