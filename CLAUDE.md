@@ -4,12 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Empty repository — no code, build system, or tests exist yet. Nothing below
-describes existing code; update this file (commands, architecture) as soon as
-there is some. Following Graham's convention for empty repos, **write a design
-document before implementing**, and record scope decisions — including what is
-deliberately *not* being built — so a later session doesn't "complete"
-something that was cut on purpose.
+Pre-implementation. `docs/design.md` is the design (architecture, verification
+gates, milestones, and an explicit **out of scope** list — don't build what it
+cuts without asking). Update this file with build/test commands once the crate
+exists.
+
+`spikes/embedding-modes/` is a Playwright probe of which SVG features work in
+`<img>` vs `<object>` per browser engine. Run with
+`cd spikes/embedding-modes && npm install && npm run probe`. Playwright is pinned
+to 1.56.1 because that matches the browser builds cached in
+`~/Library/Caches/ms-playwright`; a newer version needs `npx playwright install`.
 
 ## Purpose
 
@@ -46,11 +50,12 @@ than relying on one static raster.
   `monospace`, …) are mapped onto available/embedded faces. A rasterizer that
   renders with different font metrics than the browser will hide
   text-overflow bugs — measure text with the same fonts the viewer will use.
-- **GitHub README embedding** (re-verify, third-party behaviour): images in
-  READMEs are served through GitHub's image proxy and displayed via `<img>`,
-  where scripts and pointer interaction don't run; CSS/SMIL animation does.
-  Headers intended for READMEs therefore can't depend on hover or JS — keep
-  interactive variants for pages that inline the SVG.
+- **GitHub README embedding = `<img>`** (verified by the spike, 2026-09-27, not
+  yet through GitHub's camo proxy itself): CSS keyframes and SMIL run in all
+  engines; `:hover` runs in none; `prefers-color-scheme` inside the SVG is
+  ignored by WebKit/Safari. So the `readme` profile is animation-only with
+  light/dark as two files via `<picture>`; hover belongs to the `interactive`
+  profile.
 - **Stack preference:** pure Rust with no external runtime dependency (no
   Node, headless browser, or JVM) where a Rust option exists; a single crate
   with directory modules rather than a Cargo workspace. If a browser is truly

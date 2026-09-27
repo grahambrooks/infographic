@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100" viewBox="0 0 400 100">
+  <style>
+    @keyframes slide { from { transform: translateX(0) } to { transform: translateX(60px) } }
+    #css { animation: slide 2s linear infinite; }
+    #hov { fill: blue; }
+    #hov:hover { fill: red; }
+    #dark { fill: white; }
+    @media (prefers-color-scheme: dark) { #dark { fill: black; } }
+  </style>
+  <rect width="400" height="100" fill="#888"/>
+  <!-- A: CSS keyframes -->
+  <rect id="css" x="5" y="30" width="30" height="40" fill="orange"/>
+  <!-- B: SMIL -->
+  <rect x="105" y="30" width="30" height="40" fill="green">
+    <animate attributeName="x" from="105" to="165" dur="2s" repeatCount="indefinite"/>
+  </rect>
+  <!-- C: hover -->
+  <rect id="hov" x="200" y="0" width="100" height="100"/>
+  <!-- D: dark mode -->
+  <rect id="dark" x="300" y="0" width="100" height="100"/>
+</svg>
