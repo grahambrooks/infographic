@@ -1,0 +1,19 @@
+README.md
+  s_e608024ebbef33::t_f9e22689ea0ba1 37-63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b45a093804a93ed1778bcefa2ef18e76b9bd7cd2",
+  "prompts": {},
+  "sessions": {
+    "s_e608024ebbef33": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e07cfebe-214e-42bb-a8d2-dbbf1a2f359c",
+        "model": "unknown"
+      },
+      "human_author": "Graham Brooks <graham@grahambrooks.com>"
+    }
+  }
+}
