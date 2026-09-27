@@ -79,7 +79,7 @@ phases:
   - name: Marked unhealthy
     caption: traffic is routed to A only
     set: { health: UNHEALTHY }
-    timer: { node: b, label: next check }   # shrinking bar for the phase
+    timer: { node: b, label: next check }   # shrinking bar for the phase; a node can have one per phase, each with its own label
     flows:
       - { path: [req, to_a, from_a, resp], outcome: ok, rate: 1.6/s }
   - name: Recovered                     # last phase restores phase 1's values,
@@ -109,8 +109,10 @@ This example is complete and passes the gate (a test builds it). `examples/` hol
 - A `rate` phase lasts at least 5s. It spawns tokens for about 3s, then lets
   them finish, so `rate` sets how dense the stream looks.
 - A `count` or `ramp` phase lasts as long as its tokens take.
-- The storyboard captures each phase mid-way, or just after a ramp's last
-  step.
+- The storyboard captures each phase at its most telling moment: a token in
+  flight (preferring the outcome colour on the way back), the ramp as far
+  along as possible, and tokens mid-edge. A phase with traffic always shows
+  some. There is no need to tune `duration` to get tokens into the frame.
 
 **Ramps** count every token that arrives back at the counter's node on its
 return leg, whatever its outcome. Put only the flow being counted in a ramp
@@ -148,8 +150,9 @@ prints a JSON report.
 ## 4. Critique
 
 Read `<slug>.storyboard.png` with the Read tool. It has one row per phase,
-light theme on the left and dark on the right. Each row is captured mid-phase,
-or just after the last step of a `ramp`. Judge each row against its phase:
+light theme on the left and dark on the right. Each row is captured at the
+phase's most telling moment (see Timing above). Judge each row against its
+phase:
 
 - Does the frame show what the caption claims? Check the right state badge and
   counter, tokens on the right edges in the right colours, and nothing

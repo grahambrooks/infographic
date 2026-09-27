@@ -97,6 +97,48 @@ impl Track {
     }
 }
 
+/// Picks the storyboard moment for a phase by sampling it and preferring, in
+/// order: any token in flight; ramp progress (the counter is the point of a
+/// ramp phase); tokens on a return leg (they show the outcome colour); more
+/// tokens in flight; tokens near the middle of
+/// their edge, not hidden at an arrowhead; closeness to mid-phase.
+fn best_frame(segments: &[Segment], ramp_steps: &[f64], start: f64, end: f64) -> f64 {
+    const STEP: f64 = 0.05;
+    let mid = (start + end) / 2.0;
+    let score = |t: f64| {
+        let live: Vec<&Segment> = segments.iter().filter(|s| t >= s.t0 && t < s.t1).collect();
+        let returning = live.iter().filter(|s| s.tone.is_some()).count().min(3);
+        let ramp = ramp_steps.iter().filter(|&&r| r <= t).count();
+        // Mean distance from the middle of each token's edge, 0 (centred) to 0.5 (at an end).
+        let off = if live.is_empty() {
+            0.0
+        } else {
+            live.iter()
+                .map(|s| ((t - s.t0) / (s.t1 - s.t0) - 0.5).abs())
+                .sum::<f64>()
+                / live.len() as f64
+        };
+        (
+            !live.is_empty(),
+            ramp,
+            returning,
+            live.len().min(6),
+            -(off * 100.0).round() as i64,
+            -((t - mid).abs() * 100.0).round() as i64,
+        )
+    };
+    let mut best = (mid, score(mid));
+    let mut t = start + STEP;
+    while t < end - STEP {
+        let sc = score(t);
+        if sc > best.1 {
+            best = (t, sc);
+        }
+        t += STEP;
+    }
+    best.0
+}
+
 pub fn schedule(spec: &Spec, scene: &Scene) -> (Timeline, Vec<Finding>) {
     let mut findings = Vec::new();
     let mut tl = Timeline {
@@ -229,7 +271,8 @@ pub fn schedule(spec: &Spec, scene: &Scene) -> (Timeline, Vec<Finding>) {
             None => needed.max(read).max(MIN_PHASE),
         };
         let (start, end) = (t, t + duration);
-        let mut frame = (start + end) / 2.0;
+        let first_segment = tl.segments.len();
+        let mut ramp_steps: Vec<f64> = Vec::new();
 
         // Tokens.
         let mut arrivals: Vec<(String, f64)> = Vec::new(); // (node, time) on return legs
@@ -305,11 +348,10 @@ pub fn schedule(spec: &Spec, scene: &Scene) -> (Timeline, Vec<Finding>) {
             let dir = (b - a).signum();
             for (i, ti) in at.iter().take(steps).enumerate() {
                 tr.at(*ti, (a + dir * (i as i64 + 1)).to_string());
-            }
-            if let Some(last) = at.get(steps.min(at.len()).wrapping_sub(1)) {
-                frame = (last + 0.3).min(end - 0.05);
+                ramp_steps.push(*ti);
             }
         }
+        let frame = best_frame(&tl.segments[first_segment..], &ramp_steps, start, end);
 
         // Timer, caption, phase indicator.
         if let Some(node) = p
@@ -317,7 +359,7 @@ pub fn schedule(spec: &Spec, scene: &Scene) -> (Timeline, Vec<Finding>) {
             .as_ref()
             .and_then(|tm| spec.timer_node(tm))
             .and_then(|n| scene.node(n))
-            && let Some(tm) = &node.timer
+            && let Some(tm) = node.timers.iter().find(|tm| tm.phase == n)
         {
             tl.show(tm.id.clone(), start, end);
             tl.shrinks.push(Shrink {
@@ -348,7 +390,7 @@ pub fn schedule(spec: &Spec, scene: &Scene) -> (Timeline, Vec<Finding>) {
 
     // Timer groups outside their phases must be hidden, even if never shown.
     for node in &scene.nodes {
-        if let Some(tm) = &node.timer {
+        for tm in &node.timers {
             tl.visible.entry(tm.id.clone()).or_default();
         }
     }
@@ -477,7 +519,7 @@ mod tests {
     }
 
     #[test]
-    fn ramp_phase_is_captured_after_its_last_step() {
+    fn ramp_phase_is_captured_with_its_counter_complete() {
         let (scene, tl, _) = breaker();
         let b = scene.node("breaker").unwrap();
         let shown = b
@@ -486,6 +528,40 @@ mod tests {
             .find(|c| tl.is_visible(&c.id, tl.phases[1].frame))
             .unwrap();
         assert_eq!(shown.value, 5);
+    }
+
+    /// Every phase that has traffic shows some of it in its storyboard frame
+    /// (a mid-phase capture used to miss short single-token phases).
+    #[test]
+    fn every_phase_with_flows_is_captured_with_a_token_in_flight() {
+        let fonts = Fonts::new();
+        for dir in ["examples", "infographics"] {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
+                    continue;
+                }
+                let s = spec::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+                let (scene, _) = layout::layout(&s, &fonts);
+                let (tl, _) = schedule(&s, &scene);
+                for (i, (p, span)) in s.phases.iter().zip(&tl.phases).enumerate() {
+                    if p.flows.is_empty() {
+                        continue;
+                    }
+                    let live = tl
+                        .segments
+                        .iter()
+                        .any(|x| span.frame >= x.t0 && span.frame < x.t1);
+                    assert!(
+                        live,
+                        "{} phase {} frame at {:.2}s has no token",
+                        path.display(),
+                        i + 1,
+                        span.frame
+                    );
+                }
+            }
+        }
     }
 
     #[test]

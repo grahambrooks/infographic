@@ -318,9 +318,10 @@ impl Emitter<'_> {
             for c in &node.counters {
                 self.text(&c.text);
             }
-            if let Some(tm) = &node.timer
-                && self.open_group(&tm.id)
-            {
+            for tm in &node.timers {
+                if !self.open_group(&tm.id) {
+                    continue;
+                }
                 self.text(&tm.label);
                 let tr = tm.track;
                 writeln!(

@@ -88,6 +88,9 @@ pub struct CounterText {
 
 #[derive(Debug, Clone)]
 pub struct Timer {
+    /// The phase (1-based) this timer runs in. A node gets one timer per phase
+    /// that uses one, all sharing the same row.
+    pub phase: usize,
     pub id: String,
     pub bar_id: String,
     pub track: Rect,
@@ -103,7 +106,7 @@ pub struct NodeBox {
     pub sublabel: Option<Text>,
     pub badges: Vec<Badge>,
     pub counters: Vec<CounterText>,
-    pub timer: Option<Timer>,
+    pub timers: Vec<Timer>,
 }
 
 #[derive(Debug, Clone)]
@@ -189,7 +192,7 @@ impl Scene {
             v.extend(&n.sublabel);
             v.extend(n.badges.iter().map(|b| &b.text));
             v.extend(n.counters.iter().map(|c| &c.text));
-            v.extend(n.timer.iter().map(|t| &t.label));
+            v.extend(n.timers.iter().map(|t| &t.label));
         }
         v.extend(self.edges.iter().filter_map(|e| e.label.as_ref()));
         for p in &self.pills {
@@ -353,17 +356,15 @@ fn clip(p: (f64, f64), d: (f64, f64), r: &Rect) -> Option<(f64, f64)> {
 pub fn layout(spec: &Spec, fonts: &Fonts) -> (Scene, Vec<Finding>) {
     let tm = TextMaker { fonts };
     let mut findings = Vec::new();
-    let timer_nodes: HashSet<&str> = spec
+    // (phase, node, label) for every phase that runs a timer.
+    let phase_timers: Vec<(usize, &str, &str)> = spec
         .phases
         .iter()
-        .filter_map(|p| p.timer.as_ref())
-        .filter_map(|t| spec.timer_node(t))
-        .collect();
-    let timer_label: IndexMap<&str, &str> = spec
-        .phases
-        .iter()
-        .filter_map(|p| p.timer.as_ref())
-        .filter_map(|t| spec.timer_node(t).map(|n| (n, t.label.as_str())))
+        .enumerate()
+        .filter_map(|(i, p)| {
+            let t = p.timer.as_ref()?;
+            Some((i + 1, spec.timer_node(t)?, t.label.as_str()))
+        })
         .collect();
 
     // --- nodes, sized from their measured content, positioned at the origin ---
@@ -434,28 +435,33 @@ pub fn layout(spec: &Spec, fonts: &Fonts) -> (Scene, Vec<Finding>) {
                 counters.push(CounterText { id, value: v, text });
             }
         }
-        let timer = timer_nodes.contains(sid.as_str()).then(|| {
-            let id = format!("{nid}--timer");
-            let label = tm.make(
-                format!("{id}-label"),
-                timer_label[sid.as_str()],
-                11.0,
-                Weight::Regular,
-                Ink::Muted,
-                Some(nid.clone()),
-            );
-            Timer {
-                bar_id: format!("{id}-bar"),
-                id,
-                track: Rect {
-                    x: 0.0,
-                    y: 0.0,
-                    w: 0.0,
-                    h: 4.0,
-                },
-                label,
-            }
-        });
+        let timers: Vec<Timer> = phase_timers
+            .iter()
+            .filter(|(_, node, _)| *node == sid.as_str())
+            .map(|&(phase, _, text)| {
+                let id = format!("{nid}--timer-p{phase}");
+                let label = tm.make(
+                    format!("{id}-label"),
+                    text,
+                    11.0,
+                    Weight::Regular,
+                    Ink::Muted,
+                    Some(nid.clone()),
+                );
+                Timer {
+                    phase,
+                    bar_id: format!("{id}-bar"),
+                    id,
+                    track: Rect {
+                        x: 0.0,
+                        y: 0.0,
+                        w: 0.0,
+                        h: 4.0,
+                    },
+                    label,
+                }
+            })
+            .collect();
 
         let badge_w = badges
             .iter()
@@ -468,7 +474,7 @@ pub fn layout(spec: &Spec, fonts: &Fonts) -> (Scene, Vec<Finding>) {
         ]
         .into_iter()
         .chain(counters.iter().map(|c| c.text.width))
-        .chain(timer.iter().map(|t| t.label.width))
+        .chain(timers.iter().map(|t| t.label.width))
         .fold(0.0, f64::max);
         let w = snap((content_w + 2.0 * NODE_PAD_X).max(NODE_MIN_W));
 
@@ -487,7 +493,7 @@ pub fn layout(spec: &Spec, fonts: &Fonts) -> (Scene, Vec<Finding>) {
             sublabel,
             badges,
             counters,
-            timer,
+            timers,
         };
         node.label.anchor = Anchor::Middle;
         node.label.x = w / 2.0;
@@ -524,18 +530,21 @@ pub fn layout(spec: &Spec, fonts: &Fonts) -> (Scene, Vec<Finding>) {
             }
             y += 16.0;
         }
-        if let Some(t) = &mut node.timer {
+        if !node.timers.is_empty() {
             y += 8.0;
-            t.label.anchor = Anchor::Middle;
-            t.label.x = w / 2.0;
-            t.label.y = tm.baseline(y, 14.0, 11.0, Weight::Regular);
+            let label_y = tm.baseline(y, 14.0, 11.0, Weight::Regular);
             y += 17.0;
-            t.track = Rect {
-                x: NODE_PAD_X,
-                y,
-                w: w - 2.0 * NODE_PAD_X,
-                h: 4.0,
-            };
+            for t in &mut node.timers {
+                t.label.anchor = Anchor::Middle;
+                t.label.x = w / 2.0;
+                t.label.y = label_y;
+                t.track = Rect {
+                    x: NODE_PAD_X,
+                    y,
+                    w: w - 2.0 * NODE_PAD_X,
+                    h: 4.0,
+                };
+            }
             y += 4.0;
         }
         // Even whole-pixel heights keep every node in a row on one integer centre line.
@@ -738,7 +747,7 @@ pub fn layout(spec: &Spec, fonts: &Fonts) -> (Scene, Vec<Finding>) {
             for c in &mut n.counters {
                 shift(&mut c.text);
             }
-            if let Some(t) = &mut n.timer {
+            for t in &mut n.timers {
                 t.track.x += dx;
                 t.track.y += dy;
                 shift(&mut t.label);

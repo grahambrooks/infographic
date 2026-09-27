@@ -321,11 +321,104 @@ mod tests {
         std::fs::remove_dir_all(&out).ok();
     }
 
+    /// Two timed waits on one node (retry with backoff): each phase shows its
+    /// own label, and each bar animates in its own phase.
+    #[test]
+    fn each_timer_phase_has_its_own_label_and_running_bar() {
+        let yaml = r#"
+title: Two waits
+nodes:
+  c: { label: Client, state: s }
+  v: { label: Service }
+edges:
+  go: { from: c, to: v }
+  back: { from: v, to: c }
+states:
+  s: [CALLING, WAITING]
+phases:
+  - name: Call
+    set: { s: CALLING }
+    flows: [{ path: [go, back], outcome: fail, count: 1 }]
+  - name: Wait 1s
+    set: { s: WAITING }
+    timer: { label: wait 1s }
+  - name: Retry
+    set: { s: CALLING }
+    flows: [{ path: [go, back], outcome: fail, count: 1 }]
+  - name: Wait 2s
+    set: { s: WAITING }
+    timer: { label: wait 2s }
+  - name: Done
+    set: { s: CALLING }
+    flows: [{ path: [go, back], outcome: ok, count: 1 }]
+"#;
+        let spec = spec::parse(yaml).unwrap();
+        let fonts = Fonts::new();
+        let (scene, _) = layout::layout(&spec, &fonts);
+        let (tl, _) = timeline::schedule(&spec, &scene);
+        let desc = description(&spec);
+        for (phase, label) in [(2, "wait 1s"), (4, "wait 2s")] {
+            let span = &tl.phases[phase - 1];
+            let frame = frame_svg(&scene, &tl, &crate::theme::LIGHT, span.frame, &spec, &desc);
+            assert!(
+                frame.contains(&format!(">{label}</text>")),
+                "phase {phase} should show `{label}`"
+            );
+            let other = if phase == 2 { "wait 2s" } else { "wait 1s" };
+            assert!(
+                !frame.contains(&format!(">{other}</text>")),
+                "phase {phase} shows `{other}` too"
+            );
+            // The bar has shrunk from the track's full width by the frame time.
+            let bar = frame
+                .split(&format!("timer-p{phase}-bar\""))
+                .nth(1)
+                .unwrap();
+            let width: f64 = bar
+                .split("width=\"")
+                .nth(1)
+                .unwrap()
+                .split('"')
+                .next()
+                .unwrap()
+                .parse()
+                .unwrap();
+            let track = scene.node("c").unwrap().timers[0].track.w;
+            assert!(
+                width < track - 1.0,
+                "phase {phase} bar is not running ({width} of {track})"
+            );
+        }
+        let svg = emit::emit(
+            &scene,
+            &tl,
+            &emit::Options {
+                theme: &crate::theme::LIGHT,
+                mode: Mode::Animated,
+                font_css: None,
+                text: true,
+                title: "t",
+                desc: "d",
+            },
+        );
+        assert_eq!(
+            svg.matches(r#"attributeName="width""#).count(),
+            2,
+            "both bars must animate"
+        );
+    }
+
     /// The spec shown in the skill is what Claude learns the schema from, so it must pass too.
     #[test]
     fn skill_example_passes_the_static_gate() {
         let skill = std::fs::read_to_string(".claude/skills/infographic/SKILL.md").unwrap();
-        let yaml = skill.split("```yaml\n").nth(1).unwrap().split("```").next().unwrap();
+        let yaml = skill
+            .split("```yaml\n")
+            .nth(1)
+            .unwrap()
+            .split("```")
+            .next()
+            .unwrap();
         let dir = std::env::temp_dir().join(format!("infographic-skill-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let spec = dir.join("skill-example.yaml");
