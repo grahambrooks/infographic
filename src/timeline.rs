@@ -9,11 +9,13 @@ use crate::layout::Scene;
 use crate::spec::{SetValue, Spec, Tone, parse_ramp};
 
 /// Token speed along edges, px/s.
-pub const SPEED: f64 = 220.0;
+pub const SPEED: f64 = 300.0;
 const LEAD: f64 = 0.4;
 const TAIL: f64 = 0.5;
 const DEFAULT_RATE: f64 = 1.5;
 const RATE_PHASE: f64 = 5.0;
+/// Seconds during which a steady (`rate`) flow keeps spawning tokens, so the rate is visible.
+const RATE_WINDOW: f64 = 3.0;
 const MIN_PHASE: f64 = 3.0;
 
 #[derive(Debug, Clone)]
@@ -210,7 +212,7 @@ pub fn schedule(spec: &Spec, scene: &Scene) -> (Timeline, Vec<Finding>) {
                 Some(c) => {
                     lead(fi, pl) + (c.saturating_sub(1)) as f64 * pl.spacing + pl.travel + TAIL
                 }
-                None => (LEAD + pl.travel + TAIL).max(RATE_PHASE),
+                None => (LEAD + RATE_WINDOW + pl.travel + TAIL).max(RATE_PHASE),
             })
             .fold(0.0, f64::max);
         let duration = match p.duration {

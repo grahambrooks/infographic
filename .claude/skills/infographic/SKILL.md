@@ -24,7 +24,9 @@ repository (the directory three levels above this file) with
 From your own knowledge of the subject, decide these things before writing any
 YAML:
 
-- **Takeaway**: one sentence, the thing the viewer should leave knowing.
+- **Takeaway**: one sentence, the thing the viewer should leave knowing. It
+  is also the subtitle and the image's alt text, so keep it under about 90
+  characters.
 - **Actors**: 2–5 components. Traffic flows between them.
 - **Phases**: 3–6 moments that each show one change in behaviour, in causal
   order, ending where the loop can restart cleanly.
@@ -103,6 +105,16 @@ This example is complete and passes the gate (a test builds it). `examples/` hol
 
 **Timing** is derived from the flows and caption length. Leave out
 `duration`, unless a phase has to be held longer.
+
+- A `rate` phase lasts at least 5s. It spawns tokens for about 3s, then lets
+  them finish, so `rate` sets how dense the stream looks.
+- A `count` or `ramp` phase lasts as long as its tokens take.
+- The storyboard captures each phase mid-way, or just after a ramp's last
+  step.
+
+**Ramps** count every token that arrives back at the counter's node on its
+return leg, whatever its outcome. Put only the flow being counted in a ramp
+phase.
 
 **Current limits.** The findings will tell you if you break these.
 

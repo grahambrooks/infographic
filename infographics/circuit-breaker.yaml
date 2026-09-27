@@ -1,0 +1,50 @@
+title: Circuit breaker
+story:
+  takeaway: A circuit breaker stops calling a failing service and fails fast until a trial call shows it has recovered
+  notes: >-
+    Trips on a consecutive-failure count (3) rather than a sliding-window failure
+    rate. The open state is shown returning errors; real clients often return a
+    fallback instead. A failed half-open trial would reopen the breaker and restart
+    the cooldown; this loop shows only the successful trial.
+nodes:
+  client:  { label: Client }
+  breaker: { label: Circuit breaker, state: circuit, counter: failures }
+  service: { label: Service }
+edges:
+  call:  { from: client, to: breaker }
+  fwd:   { from: breaker, to: service }
+  back:  { from: service, to: breaker }
+  reply: { from: breaker, to: client }
+states:
+  circuit:
+    values: [CLOSED, OPEN, HALF-OPEN]
+    tones: { CLOSED: ok, OPEN: fail, HALF-OPEN: warn }
+counters:
+  failures: { label: failures, max: 3 }
+phases:
+  - name: Closed
+    caption: calls pass through to the service
+    set: { circuit: CLOSED, failures: 0 }
+    flows:
+      - { path: [call, fwd, back, reply], outcome: ok, rate: 1.5/s }
+  - name: Service fails
+    caption: each failed call is counted
+    ramp: { failures: 0..3 }
+    flows:
+      - { path: [call, fwd, back, reply], outcome: fail, rate: 1/s }
+  - name: Open
+    caption: calls fail fast without reaching the service
+    set: { circuit: OPEN }
+    timer: { node: breaker, label: cooldown }
+    flows:
+      - { path: [call, reply], outcome: fail, rate: 1/s }
+  - name: Half-open
+    caption: one trial call tests the service
+    set: { circuit: HALF-OPEN }
+    flows:
+      - { path: [call, fwd, back, reply], outcome: ok, count: 1 }
+  - name: Closed again
+    caption: the trial succeeded, so traffic resumes
+    set: { circuit: CLOSED, failures: 0 }
+    flows:
+      - { path: [call, fwd, back, reply], outcome: ok, rate: 1.5/s }
