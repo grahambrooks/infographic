@@ -1,0 +1,50 @@
+title: TCP three-way handshake
+story:
+  takeaway: SYN, SYN-ACK, ACK sync both sides' sequence numbers before any data flows
+  notes: >-
+    x and y are each side's random initial sequence numbers (ISNs). Each ACK
+    acknowledges the peer's ISN + 1 because a SYN consumes one sequence number.
+    SYN and the final ACK travel on the same client-to-server edge; the segment
+    type and its numbers are carried by the phase name. Retransmission of lost
+    segments, simultaneous open and SYN cookies are not shown. The final phase
+    closes the connection so the loop can restart; the FIN/ACK teardown itself
+    is not drawn.
+nodes:
+  client: { label: Client, state: cstate, sublabel: "ISN x" }
+  server: { label: Server, state: sstate, sublabel: "ISN y" }
+edges:
+  c2s: { from: client, to: server }
+  s2c: { from: server, to: client }
+states:
+  cstate:
+    values: [CLOSED, SYN-SENT, ESTABLISHED]
+    tones: { CLOSED: neutral, SYN-SENT: warn, ESTABLISHED: ok }
+  sstate:
+    values: [LISTEN, SYN-RCVD, ESTABLISHED]
+    tones: { LISTEN: neutral, SYN-RCVD: warn, ESTABLISHED: ok }
+phases:
+  - name: SYN seq=x
+    caption: client opens at ISN x
+    set: { cstate: SYN-SENT, sstate: LISTEN }
+    flows:
+      - { path: [c2s], outcome: ok, count: 1 }
+  - name: SYN-ACK seq=y ack=x+1
+    caption: server confirms x, offers y
+    set: { sstate: SYN-RCVD }
+    flows:
+      - { path: [s2c], outcome: ok, count: 1 }
+  - name: ACK ack=y+1
+    caption: client confirms y
+    set: { cstate: ESTABLISHED }
+    flows:
+      - { path: [c2s], outcome: ok, count: 1 }
+  - name: Established
+    caption: server is open too; data flows both ways
+    set: { sstate: ESTABLISHED }
+    flows:
+      - { path: [c2s, s2c], outcome: ok, rate: 1/s }
+  - name: Closed
+    caption: after teardown the server listens again
+    set: { cstate: CLOSED, sstate: LISTEN }
+    duration: 2
+    flows: []

@@ -1,0 +1,52 @@
+title: Retry with exponential backoff
+story:
+  takeaway: A failed call is retried after waits that double each time, giving the service room to recover
+  notes: >-
+    Waits are shown by the client's badge and by phase lengths in proportion (1s, then 2s).
+    The retry counter ticks when a retry is sent, against a budget of 3. A real policy keeps
+    doubling up to a cap, gives up when the budget is spent, and adds random jitter so clients
+    don't retry in sync. Only idempotent calls should be retried.
+nodes:
+  client:  { label: Client, sublabel: retry policy, state: delay, counter: retries }
+  service: { label: Service }
+edges:
+  call:  { from: client, to: service }
+  reply: { from: service, to: client }
+states:
+  delay:
+    values: [CALLING, WAIT 1s, WAIT 2s]
+    tones: { CALLING: neutral, "WAIT 1s": warn, "WAIT 2s": warn }
+counters:
+  retries: { label: retries, max: 3 }
+phases:
+  - name: Call fails
+    caption: the overloaded service returns an error
+    set: { delay: CALLING, retries: 0 }
+    flows:
+      - { path: [call, reply], outcome: fail, count: 1 }
+    duration: 2.8
+  - name: Back off 1s
+    caption: the client waits before retrying
+    set: { delay: WAIT 1s }
+    duration: 2.5
+  - name: Retry 1 fails
+    caption: still overloaded, another error
+    set: { delay: CALLING, retries: 1 }
+    flows:
+      - { path: [call, reply], outcome: fail, count: 1 }
+    duration: 2.8
+  - name: Back off 2s
+    caption: the wait doubles
+    set: { delay: WAIT 2s }
+    duration: 5
+  - name: Retry 2 succeeds
+    caption: the service has recovered
+    set: { delay: CALLING, retries: 2 }
+    flows:
+      - { path: [call, reply], outcome: ok, count: 1 }
+    duration: 2.8
+  - name: Reset
+    caption: success resets the retry budget
+    set: { retries: 0 }
+    flows:
+      - { path: [call, reply], outcome: ok, rate: 0.8/s }

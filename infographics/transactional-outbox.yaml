@@ -1,0 +1,51 @@
+title: Transactional outbox
+story:
+  takeaway: Save the event in the same transaction as the data; a relay publishes it later
+  notes: >-
+    The database write is one transaction inserting both the order row and the
+    outbox row; it is drawn as a single write token. The relay is shown polling;
+    log-tailing (CDC) relays behave the same way. Delivery is at-least-once: a
+    relay that crashes after publishing but before marking the row sent will
+    publish it again, so consumers must be idempotent.
+nodes:
+  service: { label: Order service }
+  db:      { label: Database, sublabel: orders + outbox, counter: outbox }
+  relay:   { label: Outbox relay }
+  broker:  { label: Message broker, state: broker }
+edges:
+  write:   { from: service, to: db, label: one transaction }
+  commit:  { from: db, to: service }
+  poll:    { from: db, to: relay }
+  mark:    { from: relay, to: db, label: mark sent }
+  publish: { from: relay, to: broker }
+  puback:  { from: broker, to: relay }
+states:
+  broker:
+    values: [UP, DOWN]
+    tones: { UP: ok, DOWN: fail }
+counters:
+  outbox: { label: unsent }
+phases:
+  - name: Atomic write
+    caption: order and event commit together or not at all
+    set: { broker: UP, outbox: 0 }
+    flows:
+      - { path: [write, commit], outcome: ok, rate: 0.5/s }
+  - name: Relay publishes
+    caption: the relay reads the row, publishes it, then marks it sent
+    set: { outbox: 2 }
+    ramp: { outbox: 2..0 }
+    flows:
+      - { path: [poll, publish, puback, mark], outcome: ok, count: 2 }
+  - name: Broker down
+    caption: orders still commit; their events wait in the outbox
+    set: { broker: DOWN, outbox: 3 }
+    flows:
+      - { path: [write, commit], outcome: ok, rate: 1.5/s }
+      - { path: [poll, publish, puback], outcome: fail, rate: 1/s }
+  - name: Backlog drains
+    caption: the broker recovers and the relay publishes every waiting event
+    set: { broker: UP }
+    ramp: { outbox: 3..0 }
+    flows:
+      - { path: [poll, publish, puback, mark], outcome: ok, count: 3 }

@@ -39,6 +39,10 @@ PNG, and a `<picture>` snippet for embedding in a GitHub README.
 Each one was generated from its spec in [`infographics/`](infographics/). They
 switch between light and dark with your GitHub theme.
 
+**[Showcase →](docs/showcase.md)** has every infographic so far, including
+benchmark runs for retry with backoff, transactional outbox and the TCP
+handshake, with build rounds, browser results and the gaps each one found.
+
 ### Circuit breaker
 
 Made by the skill from the one-line request "create an infographic for the
