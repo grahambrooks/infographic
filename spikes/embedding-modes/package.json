@@ -2,6 +2,6 @@
   "name": "spike-embedding-modes",
   "private": true,
   "type": "module",
-  "scripts": { "probe": "node run.mjs" },
+  "scripts": { "probe": "node run.mjs", "font": "node font.mjs", "verify": "node verify.mjs" },
   "dependencies": { "playwright": "1.56.1" }
 }

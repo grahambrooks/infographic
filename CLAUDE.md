@@ -2,71 +2,114 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Status
+## What this is
 
-Pre-implementation. `docs/design.md` is the design (architecture, verification
-gates, milestones, and an explicit **out of scope** list — don't build what it
-cuts without asking). Update this file with build/test commands once the crate
-exists.
+Skills and tools that make Claude reliably produce compelling, animated SVG
+infographics: technical explainers (patterns, processes, data flow) and,
+later, GitHub README headers.
 
-`spikes/embedding-modes/` is a Playwright probe of which SVG features work in
-`<img>` vs `<object>` per browser engine. Run with
-`cd spikes/embedding-modes && npm install && npm run probe`. Playwright is pinned
-to 1.56.1 because that matches the browser builds cached in
-`~/Library/Caches/ms-playwright`; a newer version needs `npx playwright install`.
+The entry point is the skill `.claude/skills/infographic/`, driven by a
+one-line request ("create an infographic for the circuit breaker pattern").
+Claude designs from its own knowledge and writes a YAML spec. The Rust
+`infographic` CLI does all layout, timing, SVG emission and verification.
+Claude fixes findings in the spec, never in the emitted SVG.
 
-## Purpose
+`docs/design.md` is the design: milestones, done-when criteria, and an
+explicit **out of scope** list. Don't build what it cuts without asking.
+Milestone 1 (circuit breaker end to end, `readme` profile, static gate) is
+implemented. The browser gate (milestone 2) and the `interactive` profile
+(milestone 3) are not.
 
-Skills and tools that make Claude reliably produce compelling, interactive SVG
-infographics: technical explainers (software architecture, processes, data
-flow) and header/banner images for GitHub project READMEs.
+## Commands
 
-The entry point is the skill, driven by a one-line request ("create an
-infographic for the circuit breaker pattern"). Claude designs from its own
-knowledge and writes a YAML spec; the Rust `infographic` CLI does all layout,
-timing, SVG emission and verification. Claude fixes findings in the spec, never
-in the emitted SVG.
+```bash
+cargo build
+cargo test                                   # unit tests; the fixture is examples/circuit-breaker.yaml
+cargo test timeline::tests::exactly_one      # a single test, by name filter
+cargo clippy && cargo fmt
+cargo install --path .                       # the skill expects `infographic` on PATH
 
-The motivating problem: ad-hoc SVG infographics have so far needed several
-rounds of refinement before they were acceptable. The project should shrink
-that loop. The known pain points, in order of how often they caused rework:
+infographic build examples/circuit-breaker.yaml -o /tmp/out [--frames]
+infographic check any.svg [--profile readme|interactive] [--png out.png]
+```
 
-1. **Visual review.** The only dependable check has been rasterizing the SVG
-   to PNG and looking at it. Treat render-and-inspect as a required step of
-   every generation, not an optional one — an SVG that parses and an exit code
-   of 0 say nothing about whether text is clipped, overlapping, or missing.
-2. **Animation** of data/process flow (dashes moving along paths, tokens
-   travelling between nodes) staying aligned with the geometry it animates.
-3. **Hover/interaction** targets and their tooltips/highlights being aligned
-   with, and correctly laid out relative to, the elements they belong to.
+Both commands print a JSON report. Exit status is 0 if the gate passed, 1 on
+findings with severity error, and 2 if the command itself failed.
 
-A PNG snapshot shows a single frame with no hover state, so pain points 2 and 3
-need their own verification strategy (e.g. rendering at several animation
-timestamps / with hover states forced, or checking geometry numerically) rather
-than relying on one static raster.
+Browser verification (Node + Playwright, kept in `spikes/`, not in the crate):
+
+```bash
+infographic build <spec> -o <dir> --frames
+cd spikes/embedding-modes && npm install && node verify.mjs <dir> <slug>
+```
+
+`verify.mjs` checks playback inside `<img>`. It also seeks Chromium, Firefox
+and WebKit to each storyboard frame's time, and asserts that the browser shows
+exactly the elements the timeline says, with tokens within 1.5px. It has been
+confirmed to fail on tampered output. Playwright is pinned to 1.56.1 to match
+the browser builds cached in `~/Library/Caches/ms-playwright`.
+
+## Architecture
+
+The pipeline is `spec` → `layout` → `timeline` → `emit` → `check`. It is
+built around two single sources of truth, and most bugs this project exists
+to prevent come from breaking one of them:
+
+- **`layout::Scene`** holds every position, including measured text runs. The
+  emitter only ever reads it.
+  - Tokens move along the drawn edge via `<mpath href="#e-…">`. Path data is
+    never copied.
+  - Every state and counter value is a pre-measured text alternative, so node
+    boxes fit the widest one.
+- **`timeline::Timeline`** holds every time, as visibility intervals, token
+  segments and shrinks over one cycle. Every SMIL animation gets
+  `dur = cycle` and `repeatCount="indefinite"`, and is placed by `keyTimes`.
+  `check::lint` fails any SVG where durations differ.
+- The timeline looks up element ids from the Scene by value. Don't
+  re-`format!` ids in two places.
+
+**One emitter, two modes.** `emit::Mode::Animated` writes the deliverable.
+`Mode::Frame(t)` writes a still of the same scene at time `t`. The storyboard,
+the geometry checks and the contrast checks all run on frames, so they see
+every state alternative. `verify.mjs` compares frames against real browsers,
+so a frame and the animation can't silently disagree.
+
+**Checks run on SVG, not on the Scene** (`check::geometry` via usvg with the
+pinned fonts). That way `check` also works on hand-written SVGs.
+
+- Emitted elements carry `data-role` (`node`, `edge`, `token`) and
+  `data-container` (the element whose box a text must stay inside).
+- `finding::describe` maps ids back to spec names, so findings read
+  `node breaker`, not `n-breaker`. Keep the id scheme in `layout.rs` and
+  `describe` in sync.
+
+**Fonts.** IBM Plex Sans (OFL, `assets/fonts/`) is compiled in. The same
+bytes are used for:
+- measuring text (rustybuzz);
+- the subset embedded in every SVG as base64 `@font-face` (fontcull, built
+  without its C++ WOFF2 feature);
+- usvg rendering, with `sans-serif` mapped onto it.
+
+The spike verified that embedded fonts apply inside `<img>` in all three
+engines.
 
 ## Constraints and lessons that apply here
 
-- **Emit real SVG `<text>`, never `<foreignObject>`.** SVG-only consumers
-  (rasterizers, PDF pipelines, `usvg`/`resvg`) silently drop foreignObject
-  content — boxes survive, all text vanishes, nothing errors. Learned on the
-  `mmd` project. Prefer presentation attributes over a CSS cascade where
-  consumer CSS support is uncertain.
-- **Fonts:** `usvg` drops text unless generic families (`sans-serif`,
-  `monospace`, …) are mapped onto available/embedded faces. A rasterizer that
-  renders with different font metrics than the browser will hide
-  text-overflow bugs — measure text with the same fonts the viewer will use.
-- **GitHub README embedding = `<img>`** (verified by the spike, 2026-09-27, not
-  yet through GitHub's camo proxy itself): CSS keyframes and SMIL run in all
-  engines; `:hover` runs in none; `prefers-color-scheme` inside the SVG is
-  ignored by WebKit/Safari. So the `readme` profile is animation-only with
-  light/dark as two files via `<picture>`; hover belongs to the `interactive`
-  profile.
-- **Stack preference:** pure Rust with no external runtime dependency (no
-  Node, headless browser, or JVM) where a Rust option exists; a single crate
-  with directory modules rather than a Cargo workspace. If a browser is truly
-  required (e.g. to verify hover/animation), make that an explicit, recorded
-  design decision.
+- **Emit real SVG `<text>`, never `<foreignObject>`.** SVG-only consumers drop
+  it silently (learned on `mmd`). Use presentation attributes, not a CSS
+  cascade.
+- **GitHub README embedding = `<img>`** (spike, 2026-09-27, not yet through
+  GitHub's camo proxy):
+  - CSS and SMIL animation run in all engines;
+  - `:hover` runs in none;
+  - WebKit ignores `prefers-color-scheme` inside the SVG, so light/dark are
+    two files switched by `<picture>` (the report's `embed`).
+- **A passing gate is not a good infographic.** Always look at the storyboard
+  PNG. Conversely, when adding a check, confirm it fails on bad input.
+- **Stack:** pure Rust, one crate with directory modules. The one recorded
+  exception is a browser for animation and hover verification. It is still
+  Node/Playwright in `spikes/`; the design calls for chromiumoxide in the
+  crate.
 
 ## Workflow
 

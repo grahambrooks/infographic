@@ -1,0 +1,49 @@
+# Fixture for tests, and the reference the skill's output is compared against.
+title: Circuit breaker
+story:
+  takeaway: A breaker stops a failing dependency from dragging its callers down with it
+  notes: >-
+    Simplified to a consecutive-failure threshold; real breakers often use a
+    failure rate over a sliding window.
+nodes:
+  client:  { label: Client }
+  breaker: { label: Circuit breaker, state: breaker, counter: failures }
+  service: { label: Payment service }
+edges:
+  call:     { from: client,  to: breaker }
+  forward:  { from: breaker, to: service }
+  reply:    { from: service, to: breaker }
+  response: { from: breaker, to: client }
+states:
+  breaker:
+    values: [CLOSED, OPEN, HALF-OPEN]
+    tones: { CLOSED: ok, OPEN: fail, HALF-OPEN: warn }
+counters:
+  failures: { label: failures, max: 5 }
+phases:
+  - name: Closed
+    caption: requests pass through to the service
+    set: { breaker: CLOSED, failures: 0 }
+    flows:
+      - { path: [call, forward, reply, response], outcome: ok, rate: 1.5/s }
+  - name: Service degrades
+    caption: each failed reply counts toward the threshold
+    ramp: { failures: 0..5 }
+    flows:
+      - { path: [call, forward, reply, response], outcome: fail, rate: 1.5/s }
+  - name: Open
+    caption: calls fail fast with a fallback; the service gets time to recover
+    set: { breaker: OPEN }
+    timer: { label: cooldown }
+    flows:
+      - { path: [call, response], outcome: fallback, rate: 1.5/s }
+  - name: Half-open
+    caption: one trial request is let through
+    set: { breaker: HALF-OPEN }
+    flows:
+      - { path: [call, forward, reply, response], outcome: ok, count: 1 }
+  - name: Closed again
+    caption: the trial succeeded, so normal traffic resumes
+    set: { breaker: CLOSED, failures: 0 }
+    flows:
+      - { path: [call, forward, reply, response], outcome: ok, rate: 1.5/s }

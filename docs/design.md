@@ -1,6 +1,6 @@
 # Infographic: design
 
-Status: draft, 2026-09-27. Nothing is implemented yet.
+Status: 2026-09-27. Milestone 1 is implemented; see "Decisions made in milestone 1".
 
 ## Problem
 
@@ -209,11 +209,12 @@ SVG strings. This is the same pattern as `mmd` and `puml`.
 
 | Role | Crate |
 |---|---|
-| Spec parsing | a maintained serde YAML crate (`serde_yaml` is unmaintained; pick one in milestone 1) |
-| Layered graph layout | `rust-sugiyama` (positions only; own orthogonal edge router) |
+| Spec parsing | `serde-saphyr` (chosen; `serde_yaml` and `serde_yml` are unmaintained) |
+| Layered graph layout | own longest-path ranking in `layout.rs` (enough for milestone 1); `rust-sugiyama` when ordering within ranks matters |
 | Panel and header layout | `taffy` |
-| Text measurement | `parley` or `cosmic-text` |
-| SVG writing | `svg` |
+| Text measurement | `rustybuzz` shaping (chosen: single-line labels need no line breaking) |
+| SVG writing | plain string emission (chosen: the emitter needs exact control of attributes and animation children) |
+| Font subsetting | `fontcull` without its C++ WOFF2 feature (keeps `cmap`, unlike `subsetter`) |
 | Static render and element boxes | `resvg` / `usvg` |
 | Dynamic render | `chromiumoxide` driving installed Chrome |
 | Image diff | `image-compare` (not `dssim`, which is AGPL) |
@@ -344,14 +345,30 @@ Drawn from prior art (`diagram-design`, Ciechanowski, ByteByteGo):
 
 ## Open questions
 
-- **Fonts in `readme`**: whether base64-embedded `@font-face` with a subset
-  font works inside `<img>` in all three engines. The `spikes/` harness can
-  test this. The fallback is outlining text to paths, which loses
-  accessibility.
 - **Arrow routing**: whether `rust-sugiyama` plus our own orthogonal router is
   good enough, or D2's ELK port is worth using as an external backend.
 - **Optimising output**: whether `oxvg` keeps SMIL and `begin` references
   intact. Until that's known, don't optimise, and snapshot-test whatever is
   emitted.
-- **Where outputs go**: probably the current directory, with the file slug
-  taken from the title. Confirm this when the skill is written.
+
+## Decisions made in milestone 1
+
+- **Fonts**: IBM Plex Sans (OFL), compiled in. A subset is embedded as base64
+  `@font-face`. The spike showed this applies inside `<img>` in Chromium,
+  Firefox and WebKit. The same bytes measure text and drive usvg, so all
+  three consumers agree on widths.
+- **Outputs**: the skill writes `infographics/<slug>.yaml` in the current
+  directory. `build` writes its outputs next to the spec, or to `-o`.
+- **Frames are timeline stills.** The storyboard and every geometry and
+  contrast check run on `Mode::Frame(t)` stills of the scene. They share the
+  emitter's code path, so each state alternative is checked in the phase
+  where it is shown.
+- **Browser comparison before milestone 2.**
+  `spikes/embedding-modes/verify.mjs` seeks Chromium, Firefox and WebKit to
+  each frame's time, and asserts they show exactly what the frame shows,
+  tokens within 1.5px. It stays Node/Playwright until the chromiumoxide gate
+  replaces it. Tampering with a motion path or giving one element its own
+  clock makes it fail.
+- **Edges are straight.** An edge through a node it doesn't connect is an
+  error, not silently drawn. Routing around nodes is future work.
+

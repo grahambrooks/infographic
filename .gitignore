@@ -1,1 +1,5 @@
 node_modules/
+/target
+*.frames/
+.DS_Store
+spikes/embedding-modes/font/
