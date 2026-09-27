@@ -1,0 +1,19 @@
+.gitignore
+  s_e608024ebbef33::t_40f704e5b5bf65 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5fc22169e0731945abea9cc11e2f699fcf0741a4",
+  "prompts": {},
+  "sessions": {
+    "s_e608024ebbef33": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e07cfebe-214e-42bb-a8d2-dbbf1a2f359c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Graham Brooks <graham@grahambrooks.com>"
+    }
+  }
+}
