@@ -130,6 +130,13 @@ The three scenarios were first run with the tool as it was at milestone 1:
 ### Round 2: after fixing timers and frame capture
 
 With fresh agents and the same requests:
+
+| Scenario | Builds | Result | Gate findings on the way | Caught only by the storyboard review |
+|---|---|---|---|---|
+| Retry | 2 (was 5) | passed, no findings | none | The three backoff phases lasted the same time, so nothing visibly doubled. The timer overlapped the retry it delays. "3/3" read as "gave up" before the success. |
+| Outbox | 3 (was 3) | passed, no findings | Canvas too wide (five columns), fixed by dropping the consumer. A loop-jump warning, fixed by reverting a counter change. | The backlog showed 3 before any write in that phase had landed. |
+| TCP | 3 (was 5) | passed, no findings (was 1 warning) | A loop-jump warning, fixed by adding a "Listening" opener. | SYN-ACK drawn in the request colour. The close badges changing while the FIN is in flight. |
+
 - **Build rounds** went from 5, 3 and 5 to 2, 3 and 3.
 - **Storyboard frames:** every phase with traffic now shows it. A test checks
   this for every spec in the repository.
