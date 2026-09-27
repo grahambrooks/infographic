@@ -2,49 +2,52 @@ title: Transactional outbox
 story:
   takeaway: Commit the event with the data in one transaction; a relay publishes it later
   notes: >-
-    The relay is drawn as a poller; log-tailing CDC (e.g. Debezium) plays the same role.
-    Consumers are not drawn. Delivery is at-least-once: a relay crash between publish and mark-sent republishes the
-    event, so consumers must deduplicate by event id. The backlog counter jumps to 3 at the
-    start of the outage phase, and to 1 at the start of the publish phase, because the tool can only ramp counters on return legs.
+    The relay publishes, then marks the row sent. A crash between the two
+    re-publishes the event, so delivery is at-least-once and consumers must be
+    idempotent. Consumers downstream of the broker are not drawn. Polling is
+    shown; log-tailing CDC (e.g. Debezium) is an equivalent relay.
 nodes:
-  svc:      { label: Order service }
-  db:       { label: Database, sublabel: orders + outbox, counter: backlog }
-  relay:    { label: Outbox relay }
-  broker:   { label: Message broker, state: broker }
+  service: { label: Order service }
+  db:      { label: Database, sublabel: orders + outbox, state: outbox }
+  relay:   { label: Outbox relay }
+  broker:  { label: Message broker, state: broker }
 edges:
-  write:    { from: svc, to: db, label: one tx }
-  commit:   { from: db, to: svc }
-  read:     { from: db, to: relay, label: unsent rows }
-  publish:  { from: relay, to: broker }
-  ack:      { from: broker, to: relay }
-  mark:     { from: relay, to: db, label: mark sent }
+  write:     { from: service, to: db }
+  write_ack: { from: db, to: service }
+  query:     { from: relay, to: db }
+  rows:      { from: db, to: relay }
+  publish:   { from: relay, to: broker }
+  ack:       { from: broker, to: relay }
 states:
+  outbox:
+    values: [PENDING, SENT]
+    tones: { PENDING: warn, SENT: ok }
   broker:
     values: [UP, DOWN]
     tones: { UP: ok, DOWN: fail }
-counters:
-  backlog: { label: unsent }
 phases:
   - name: Atomic write
-    caption: order and event commit together
-    set: { broker: UP, backlog: 0 }
+    caption: order row and outbox event commit in one transaction
+    set: { outbox: PENDING, broker: UP }
     flows:
-      - { path: [write, commit], outcome: ok, count: 1 }
-  - name: Relay publishes
-    caption: relay publishes it, then marks it sent
-    set: { backlog: 1 }
-    ramp: { backlog: 1..0 }
+      - { path: [write, write_ack], outcome: ok, count: 2, label: TX, reply_label: commit }
+  - name: Relay polls
+    caption: relay reads the pending event from the outbox table
     flows:
-      - { path: [read, publish, ack, mark], outcome: ok, count: 1 }
+      - { path: [query, rows], outcome: ok, count: 1, label: SELECT, reply_label: event }
   - name: Broker down
-    caption: orders still commit; events wait
-    set: { broker: DOWN, backlog: 3 }
+    caption: publish fails, so the row stays pending
+    set: { broker: DOWN }
     flows:
-      - { path: [write, commit], outcome: ok, rate: 0.8/s }
-      - { path: [read, publish, ack], outcome: fail, rate: 0.6/s }
-  - name: Broker back
-    caption: relay retries and drains the outbox
+      - { path: [publish, ack], outcome: fail, count: 1, label: event, reply_label: error }
+  - name: Retry succeeds
+    caption: after a backoff the relay retries and the broker acks
     set: { broker: UP }
-    ramp: { backlog: 3..0 }
+    timer: { node: relay, label: backoff 2s, seconds: 2s }
     flows:
-      - { path: [read, publish, ack, mark], outcome: ok, count: 3 }
+      - { path: [publish, ack], outcome: ok, count: 1, delay: 2s, label: event, reply_label: ack }
+  - name: Marked sent
+    caption: only after the ack does the relay mark the row sent
+    set: { outbox: SENT }
+    flows:
+      - { path: [query, rows], outcome: ok, count: 1, label: UPDATE, reply_label: ok }

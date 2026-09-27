@@ -1,56 +1,49 @@
 title: Retry with exponential backoff
 story:
-  takeaway: Each retry waits twice as long as the last, giving a failing service room to recover
+  takeaway: Retry transient failures, doubling the wait each time so a struggling service can recover
   notes: >-
-    Delays are a fixed 1s, 2s, 4s doubling; each phase's timer is the wait after that failure, and phase lengths are stretched to hint at the growing gap (not to scale). Real clients add random
-    jitter to each delay so retries from many clients don't arrive in sync, and
-    give up (surfacing the error) after a maximum number of attempts. Only
-    idempotent calls should be retried this way.
+    Delays are shown without jitter (1s, 2s, 4s); real clients add random jitter
+    to avoid synchronized retry storms, and cap both the delay and the attempt count
+    (e.g. give up after 4 attempts; the cap is not drawn). Only safe-to-repeat (idempotent) calls should be retried.
 nodes:
-  app:   { label: App }
-  retry: { label: Retry client, counter: failures }
-  svc:   { label: Service, state: health }
+  client: { label: Client, sublabel: retry policy, counter: failures }
+  svc:    { label: Service, state: health }
 edges:
-  call:   { from: app, to: retry }
-  try:    { from: retry, to: svc }
-  reply:  { from: svc, to: retry }
-  result: { from: retry, to: app }
+  call:  { from: client, to: svc }
+  reply: { from: svc, to: client }
 states:
   health:
-    values: [UP, DOWN]
-    tones: { UP: ok, DOWN: fail }
+    values: [OVERLOADED, RECOVERED]
+    tones: { OVERLOADED: fail, RECOVERED: ok }
 counters:
-  failures: { label: failed attempts }
+  failures: { label: failures }
 phases:
-  - name: Normal calls
-    caption: requests succeed on the first try
-    set: { health: UP, failures: 0 }
-    flows:
-      - { path: [call, try, reply, result], outcome: ok, rate: 1/s }
-  - name: Call fails
-    caption: the service errors; wait 1s before retrying
-    set: { health: DOWN }
+  - name: First try
+    caption: the call fails with a transient 503
+    set: { health: OVERLOADED, failures: 0 }
     ramp: { failures: 0..1 }
-    timer: { node: retry, label: backoff 1s }
-    duration: 5.2
     flows:
-      - { path: [call, try, reply], outcome: fail, count: 1 }
-  - name: Retry 1 fails
-    caption: the wait doubles to 2s
+      - { path: [call, reply], outcome: fail, count: 1, label: GET, reply_label: "503" }
+  - name: Wait 1s
+    caption: back off 1s, then retry
     ramp: { failures: 1..2 }
-    timer: { node: retry, label: backoff 2s }
-    duration: 5.5
+    timer: { node: client, label: backoff 1s, seconds: 1s }
     flows:
-      - { path: [try, reply], outcome: fail, count: 1 }
-  - name: Retry 2 fails
-    caption: the wait doubles again to 4s
+      - { path: [call, reply], outcome: fail, count: 1, delay: 1s, label: GET, reply_label: "503" }
+  - name: Wait 2s
+    caption: the wait doubles to 2s; still failing
     ramp: { failures: 2..3 }
-    timer: { node: retry, label: backoff 4s }
-    duration: 7.5
+    timer: { node: client, label: backoff 2s, seconds: 2s }
     flows:
-      - { path: [try, reply], outcome: fail, count: 1 }
-  - name: Retry 3 succeeds
-    caption: the service has recovered; the app gets its answer
-    set: { health: UP, failures: 0 }
+      - { path: [call, reply], outcome: fail, count: 1, delay: 2s, label: GET, reply_label: "503" }
+  - name: Wait 4s
+    caption: after 4s the retry succeeds
+    set: { health: RECOVERED }
+    timer: { node: client, label: backoff 4s, seconds: 4s }
     flows:
-      - { path: [try, reply, result], outcome: ok, count: 1 }
+      - { path: [call, reply], outcome: ok, count: 1, delay: 4s, label: GET, reply_label: "200" }
+  - name: Reset
+    caption: success clears the count for the next outage
+    set: { health: OVERLOADED, failures: 0 }
+    duration: 2s
+    flows: []
