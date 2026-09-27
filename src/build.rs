@@ -61,8 +61,7 @@ impl Report {
     }
 }
 
-const DYNAMIC_PENDING: &str =
-    "not run: the browser gate is milestone 2; frames come from the timeline, not from a browser";
+const DYNAMIC_PENDING: &str = "not run by this command: build with --frames, then run spikes/embedding-modes/verify.mjs to check playback in real browsers";
 
 fn description(spec: &Spec) -> String {
     let mut d = spec
@@ -203,8 +202,8 @@ pub fn build(spec_path: &Path, out_dir: Option<&Path>, frames: bool) -> Result<R
         outputs.push(path.display().to_string());
 
         for (i, span) in tl.phases.iter().enumerate() {
-            let frame = frame_svg(&scene, &tl, theme, span.mid(), &spec, &desc);
-            let label = format!("{}, phase {} at {:.1}s", theme.name, i + 1, span.mid());
+            let frame = frame_svg(&scene, &tl, theme, span.frame, &spec, &desc);
+            let label = format!("{}, phase {} at {:.1}s", theme.name, i + 1, span.frame);
             if frames {
                 let fd = dir.join(format!("{slug}.frames"));
                 std::fs::create_dir_all(&fd)?;
@@ -295,4 +294,44 @@ pub fn check(svg_path: &Path, profile: Profile, png: Option<&Path>) -> Result<Re
         },
         findings,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every example passes the full static gate: layout, timing, lint,
+    /// geometry and contrast in every frame of both themes.
+    #[test]
+    fn examples_pass_the_static_gate() {
+        let out = std::env::temp_dir().join(format!("infographic-test-{}", std::process::id()));
+        for entry in std::fs::read_dir("examples").unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
+                continue;
+            }
+            let r = build(&path, Some(&out), false).unwrap();
+            assert!(
+                r.ok && r.findings.is_empty(),
+                "{}: {:?}",
+                path.display(),
+                r.findings
+            );
+        }
+        std::fs::remove_dir_all(&out).ok();
+    }
+
+    /// The spec shown in the skill is what Claude learns the schema from, so it must pass too.
+    #[test]
+    fn skill_example_passes_the_static_gate() {
+        let skill = std::fs::read_to_string(".claude/skills/infographic/SKILL.md").unwrap();
+        let yaml = skill.split("```yaml\n").nth(1).unwrap().split("```").next().unwrap();
+        let dir = std::env::temp_dir().join(format!("infographic-skill-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let spec = dir.join("skill-example.yaml");
+        std::fs::write(&spec, yaml).unwrap();
+        let r = build(&spec, Some(&dir), false).unwrap();
+        assert!(r.ok && r.findings.is_empty(), "{:?}", r.findings);
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

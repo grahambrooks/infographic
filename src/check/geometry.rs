@@ -48,7 +48,10 @@ struct TextInfo {
 }
 
 pub fn options() -> usvg::Options<'static> {
-    usvg::Options { fontdb: Arc::new(crate::font::fontdb()), ..Default::default() }
+    usvg::Options {
+        fontdb: Arc::new(crate::font::fontdb()),
+        ..Default::default()
+    }
 }
 
 pub fn parse(svg: &str, opt: &usvg::Options) -> Result<usvg::Tree> {
@@ -218,58 +221,60 @@ pub fn geometry(svg: &str, opt: &usvg::Options, frame: Option<&str>) -> Result<V
             }
         }
     }
-    // Straight edges (`M x y L x y`) must not pass through nodes they don't connect.
-    for e in doc
+    // Straight edges (`M x y L x y`): parsed once, sampled along the line
+    // itself (a diagonal edge's bounding box is far larger than the line).
+    struct Line<'a> {
+        id: &'a str,
+        ends: [Option<&'a str>; 2],
+        p: [f32; 4],
+    }
+    let lines: Vec<Line> = doc
         .descendants()
         .filter(|n| n.attribute("data-role") == Some("edge"))
-    {
-        let nums: Vec<f32> = e
-            .attribute("d")
-            .unwrap_or("")
-            .split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
-            .filter_map(|x| x.parse().ok())
-            .collect();
-        let [x0, y0, x1, y1] = nums[..] else { continue };
-        let ends = [e.attribute("data-from"), e.attribute("data-to")];
+        .filter_map(|e| {
+            let nums: Vec<f32> = e
+                .attribute("d")?
+                .split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+                .filter_map(|x| x.parse().ok())
+                .collect();
+            let [x0, y0, x1, y1] = nums[..] else {
+                return None;
+            };
+            Some(Line {
+                id: e.attribute("id").unwrap_or("edge"),
+                ends: [e.attribute("data-from"), e.attribute("data-to")],
+                p: [x0, y0, x1, y1],
+            })
+        })
+        .collect();
+    let crosses = |l: &Line, b: &B, pad: f32| {
+        let [x0, y0, x1, y1] = l.p;
+        let steps = ((x1 - x0).hypot(y1 - y0) / 2.0).ceil().max(1.0) as usize;
+        (0..=steps).any(|k| {
+            let f = k as f32 / steps as f32;
+            let (x, y) = (x0 + (x1 - x0) * f, y0 + (y1 - y0) * f);
+            x > b.l - pad && x < b.r + pad && y > b.t - pad && y < b.b + pad
+        })
+    };
+    for l in &lines {
         for (id, nb) in &nodes {
-            if ends.contains(&Some(id.as_str())) {
-                continue;
-            }
-            // Sample the line; nodes are large relative to the step.
-            let hit = (0..=64).any(|k| {
-                let f = k as f32 / 64.0;
-                let (x, y) = (x0 + (x1 - x0) * f, y0 + (y1 - y0) * f);
-                x > nb.l && x < nb.r && y > nb.t && y < nb.b
-            });
-            if hit {
-                let eid = e.attribute("id").unwrap_or("edge");
+            if !l.ends.contains(&Some(id.as_str())) && crosses(l, nb, 0.0) {
                 f.push(mark(Finding::error(
                     "geometry.overlap",
-                    describe(eid),
+                    describe(l.id),
                     format!("passes through {}; edges are straight in this version, so connect only adjacent ranks or reorder nodes", describe(id)),
                 )));
             }
         }
     }
-
-    let edges = boxes("edge");
-    for t in &ts {
-        if container.contains_key(t.id.as_str()) {
-            continue;
-        }
-        for (ie, e) in &edges {
-            // An edge's own label sits beside it; anything else crossing a line is clutter.
-            let e = B {
-                l: e.l,
-                t: e.t - 0.75,
-                r: e.r,
-                b: e.b + 0.75,
-            };
-            if t.bbox.overlap_area(&e) > 0.0 {
+    // Free-standing text (edge labels, captions) must not sit on any line.
+    for t in ts.iter().filter(|t| !container.contains_key(t.id.as_str())) {
+        for l in &lines {
+            if crosses(l, &t.bbox, 0.75) {
                 f.push(mark(Finding::warning(
                     "geometry.overlap",
                     describe(&t.id),
-                    format!("text crosses {}", describe(ie)),
+                    format!("text crosses {}", describe(l.id)),
                 )));
             }
         }
@@ -412,6 +417,24 @@ mod tests {
                 .any(|x| x.message.contains("passes through node b")),
             "{f:?}"
         );
+    }
+
+    #[test]
+    fn text_on_a_line_is_found_but_text_beside_a_diagonal_is_not() {
+        let line = r##"<path id="e-x" data-role="edge" d="M10 10 L190 90" stroke="#000"/>"##;
+        let on = format!(
+            r##"{HEAD}{line}<text id="e-x--label" x="90" y="55" font-family="IBM Plex Sans" font-size="11">label</text></svg>"##
+        );
+        let f = geometry(&on, &options(), None).unwrap();
+        assert!(
+            f.iter().any(|x| x.message.contains("crosses edge x")),
+            "{f:?}"
+        );
+        // Inside the diagonal's bounding box, but well clear of the line itself.
+        let beside = format!(
+            r##"{HEAD}{line}<text id="e-x--label" x="20" y="80" font-family="IBM Plex Sans" font-size="11">label</text></svg>"##
+        );
+        assert!(geometry(&beside, &options(), None).unwrap().is_empty());
     }
 
     #[test]

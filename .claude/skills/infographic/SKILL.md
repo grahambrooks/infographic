@@ -40,51 +40,55 @@ Write the spec to `infographics/<slug>.yaml` in the current directory, unless
 the user named a location. The slug becomes the output file names.
 
 ```yaml
-title: Circuit breaker                  # short; shown as the heading
+title: Health-checked load balancing   # short; shown as the heading
 story:
-  takeaway: A breaker stops a failing dependency from dragging its callers down with it
-  notes: Simplified to a consecutive-failure threshold.   # optional
-nodes:                                  # left-to-right order comes from the edges
-  client:  { label: Client }
-  breaker: { label: Circuit breaker, state: breaker, counter: failures }
-  service: { label: Payment service, sublabel: optional second line }
+  takeaway: A load balancer stops routing to a backend that fails its health checks
+  notes: Health checks are implied, not drawn.   # optional: simplifications you made
+nodes:                                  # left-to-right order comes from the edges;
+  client: { label: Client }             # nodes in the same rank stack vertically
+  lb:     { label: Load balancer, counter: errors }
+  a:      { label: Server A }
+  b:      { label: Server B, state: health, sublabel: optional second line }
 edges:                                  # one edge per direction; pairs get parallel lanes
-  call:     { from: client,  to: breaker }
-  forward:  { from: breaker, to: service }
-  reply:    { from: service, to: breaker }
-  response: { from: breaker, to: client, label: optional }
+  req:    { from: client, to: lb }
+  to_a:   { from: lb, to: a }
+  from_a: { from: a, to: lb }
+  to_b:   { from: lb, to: b }
+  from_b: { from: b, to: lb, label: optional }
+  resp:   { from: lb, to: client }
 states:                                 # a badge on the node; one value visible at a time
-  breaker:
-    values: [CLOSED, OPEN, HALF-OPEN]
-    tones: { CLOSED: ok, OPEN: fail, HALF-OPEN: warn }    # ok | fail | warn | neutral
+  health:
+    values: [HEALTHY, UNHEALTHY]
+    tones: { HEALTHY: ok, UNHEALTHY: fail }   # ok | fail | warn | neutral
 counters:
-  failures: { label: failures, max: 5 } # shown as "failures 3/5"
+  errors: { label: errors, max: 3 }     # shown as "errors 2/3"; `max` optional
 phases:
-  - name: Closed                        # 1–3 words
-    caption: requests pass through to the service   # one short clause
-    set: { breaker: CLOSED, failures: 0 }
+  - name: Round robin                   # 1–3 words
+    caption: requests alternate between both servers   # one short clause
+    set: { health: HEALTHY, errors: 0 }
+    flows:                              # concurrent flows interleave automatically
+      - { path: [req, to_a, from_a, resp], outcome: ok, rate: 0.8/s }
+      - { path: [req, to_b, from_b, resp], outcome: ok, rate: 0.8/s }
+  - name: Server B fails
+    caption: its replies come back as errors
+    ramp: { errors: 0..3 }              # one step per token arriving back at the counter's node
     flows:
-      - { path: [call, forward, reply, response], outcome: ok, rate: 1.5/s }
-  - name: Service degrades
-    caption: each failed reply counts toward the threshold
-    ramp: { failures: 0..5 }            # one step per token arriving back at the counter's node
+      - { path: [req, to_b, from_b, resp], outcome: fail, rate: 1/s }
+  - name: Marked unhealthy
+    caption: traffic is routed to A only
+    set: { health: UNHEALTHY }
+    timer: { node: b, label: next check }   # shrinking bar for the phase
     flows:
-      - { path: [call, forward, reply, response], outcome: fail, rate: 1.5/s }
-  - name: Open
-    caption: calls fail fast with a fallback
-    set: { breaker: OPEN }
-    timer: { label: cooldown }          # shrinking bar on the node that shows a state (or `node:`)
+      - { path: [req, to_a, from_a, resp], outcome: ok, rate: 1.6/s }
+  - name: Recovered                     # last phase restores phase 1's values,
+    caption: B rejoins the pool         # so the loop restarts without a jump
+    set: { health: HEALTHY, errors: 0 }
     flows:
-      - { path: [call, response], outcome: fallback, rate: 1.5/s }   # turns back at the breaker
-  - name: Half-open
-    caption: one trial request is let through
-    set: { breaker: HALF-OPEN }
-    flows:
-      - { path: [call, forward, reply, response], outcome: ok, count: 1 }
-  # ... a final phase that resets every state and counter to its phase-1 value
+      - { path: [req, to_a, from_a, resp], outcome: ok, rate: 0.8/s }
+      - { path: [req, to_b, from_b, resp], outcome: ok, rate: 0.8/s }
 ```
 
-`examples/circuit-breaker.yaml` in this repository is a complete, passing spec.
+This example is complete and passes the gate (a test builds it). `examples/` holds more. Look at them for syntax only; design each infographic from its subject.
 
 **How flows work:**
 
@@ -92,7 +96,9 @@ phases:
 - Tokens are blue on the way out. From the first edge that heads back toward a
   node already visited, they take the `outcome` colour: `ok` is green, `fail`
   red, `fallback` amber.
-- A short-circuit is a path that turns back early (`[call, response]`).
+- A short-circuit is a path that turns back early, for example
+  `[call, response]` where `response` leaves the node `call` reached.
+- `fallback` (amber) is for a degraded answer that isn't the real result.
 - Give `rate` (a steady stream) or `count` (exactly n tokens), never both.
 
 **Timing** is derived from the flows and caption length. Leave out
@@ -104,6 +110,9 @@ phases:
 - An edge that skips a rank goes through the node in between, which is
   reported as an error. Connect adjacent components only.
 - The canvas is at most 1200px wide, so keep captions to one short clause.
+- One loop tells one path through the story. Alternative branches (for
+  example, a failed trial that reopens a breaker) go in `story.notes`, not in
+  extra phases, unless they are the point.
 - Output is the `readme` profile only: animation, no hover.
 
 ## 3. Build and check
@@ -120,14 +129,15 @@ prints a JSON report.
 - Each finding names its **spec target**, such as `node breaker`, `phase 3
   caption` or `edge call`. Fix every error, and every warning you can, **in
   the spec**. Then rebuild.
-- `gates.dynamic` says whether a browser checked the animation. In this
-  version it is not run, so never claim it passed.
+- `gates.dynamic` is always "not run" for `build`. Browser playback counts as
+  verified only when `verify.mjs` passes (step 5). Otherwise, say it wasn't
+  verified.
 
 ## 4. Critique
 
 Read `<slug>.storyboard.png` with the Read tool. It has one row per phase,
-light theme on the left and dark on the right, each captured mid-phase. Judge
-each row against its phase:
+light theme on the left and dark on the right. Each row is captured mid-phase,
+or just after the last step of a `ramp`. Judge each row against its phase:
 
 - Does the frame show what the caption claims? Check the right state badge and
   counter, tokens on the right edges in the right colours, and nothing
@@ -136,6 +146,8 @@ each row against its phase:
 - Is it accurate? Would an expert object to anything?
 - Is the text short, is there one idea per phase, and is there nothing
   decorative?
+- Does the motion say what the caption says? For example, "alternate" needs
+  interleaved tokens, and "only A" needs nothing on B's edges.
 
 Revise the spec and rebuild. Take **at most 3 rounds** in total, then deliver
 what you have and say what's left.
@@ -159,4 +171,6 @@ cd spikes/embedding-modes && npm install && node verify.mjs ../../infographics <
 ```
 
 This seeks Chromium, Firefox and WebKit to each storyboard frame, and checks
-that they show exactly what the timeline intends.
+that they show exactly what the timeline intends. `<slug>.frames/` holds the
+frames it compares against. It is diagnostic output, ignored by git; don't
+deliver it.

@@ -21,12 +21,9 @@ pub struct Span {
     pub name: String,
     pub start: f64,
     pub end: f64,
-}
-
-impl Span {
-    pub fn mid(&self) -> f64 {
-        (self.start + self.end) / 2.0
-    }
+    /// When the storyboard captures this phase: mid-phase, or just after a
+    /// ramp's last step so the frame shows where the counter got to.
+    pub frame: f64,
 }
 
 /// One token crossing one edge. Each segment is its own element, visible only
@@ -203,10 +200,16 @@ pub fn schedule(spec: &Spec, scene: &Scene) -> (Timeline, Vec<Finding>) {
                 .as_deref()
                 .map_or(0, |c| c.split_whitespace().count());
         let read = 1.5 + 0.3 * words as f64;
+        // Concurrent flows interleave instead of moving in lockstep.
+        let n_flows = plans.len().max(1) as f64;
+        let lead = |fi: usize, pl: &Plan| LEAD + fi as f64 * pl.spacing / n_flows;
         let needed = plans
             .iter()
-            .map(|pl| match pl.count {
-                Some(c) => LEAD + (c.saturating_sub(1)) as f64 * pl.spacing + pl.travel + TAIL,
+            .enumerate()
+            .map(|(fi, pl)| match pl.count {
+                Some(c) => {
+                    lead(fi, pl) + (c.saturating_sub(1)) as f64 * pl.spacing + pl.travel + TAIL
+                }
                 None => (LEAD + pl.travel + TAIL).max(RATE_PHASE),
             })
             .fold(0.0, f64::max);
@@ -224,21 +227,18 @@ pub fn schedule(spec: &Spec, scene: &Scene) -> (Timeline, Vec<Finding>) {
             None => needed.max(read).max(MIN_PHASE),
         };
         let (start, end) = (t, t + duration);
-        tl.phases.push(Span {
-            name: p.name.clone(),
-            start,
-            end,
-        });
+        let mut frame = (start + end) / 2.0;
 
         // Tokens.
         let mut arrivals: Vec<(String, f64)> = Vec::new(); // (node, time) on return legs
         for (fi, pl) in plans.iter().enumerate() {
+            let lead = lead(fi, pl);
             let spawns: Vec<f64> = match pl.count {
                 Some(c) => (0..c)
-                    .map(|k| start + LEAD + k as f64 * pl.spacing)
+                    .map(|k| start + lead + k as f64 * pl.spacing)
                     .collect(),
                 None => (0..)
-                    .map(|k| start + LEAD + k as f64 * pl.spacing)
+                    .map(|k| start + lead + k as f64 * pl.spacing)
                     .take_while(|s| s + pl.travel <= end - TAIL + 1e-9)
                     .collect(),
             };
@@ -304,6 +304,9 @@ pub fn schedule(spec: &Spec, scene: &Scene) -> (Timeline, Vec<Finding>) {
             for (i, ti) in at.iter().take(steps).enumerate() {
                 tr.at(*ti, (a + dir * (i as i64 + 1)).to_string());
             }
+            if let Some(last) = at.get(steps.min(at.len()).wrapping_sub(1)) {
+                frame = (last + 0.3).min(end - 0.05);
+            }
         }
 
         // Timer, caption, phase indicator.
@@ -321,6 +324,12 @@ pub fn schedule(spec: &Spec, scene: &Scene) -> (Timeline, Vec<Finding>) {
                 t1: end,
             });
         }
+        tl.phases.push(Span {
+            name: p.name.clone(),
+            start,
+            end,
+            frame,
+        });
         tl.show(format!("cap-{n}"), start, end);
         tl.show(format!("pill-{n}-on"), start, end);
         t = end;
@@ -463,6 +472,36 @@ mod tests {
             assert_eq!(shown(t - 0.01), i as i64);
             assert_eq!(shown(t + 0.01), i as i64 + 1);
         }
+    }
+
+    #[test]
+    fn ramp_phase_is_captured_after_its_last_step() {
+        let (scene, tl, _) = breaker();
+        let b = scene.node("breaker").unwrap();
+        let shown = b
+            .counters
+            .iter()
+            .find(|c| tl.is_visible(&c.id, tl.phases[1].frame))
+            .unwrap();
+        assert_eq!(shown.value, 5);
+    }
+
+    #[test]
+    fn concurrent_flows_interleave() {
+        let s = spec::parse(include_str!("../examples/load-balancer.yaml")).unwrap();
+        let fonts = Fonts::new();
+        let (scene, _) = layout::layout(&s, &fonts);
+        let (tl, f) = schedule(&s, &scene);
+        assert!(f.is_empty(), "{f:?}");
+        let first = |edge: &str| {
+            tl.segments
+                .iter()
+                .filter(|x| x.edge == edge)
+                .map(|x| x.t0)
+                .fold(f64::MAX, f64::min)
+        };
+        let (a, b) = (first("e-to_a"), first("e-to_b"));
+        assert!((a - b).abs() > 0.2, "flows start together: {a} vs {b}");
     }
 
     #[test]

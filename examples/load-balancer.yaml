@@ -1,0 +1,43 @@
+# Second fixture: fan-out to stacked nodes, state on a leaf, two concurrent flows.
+title: Health-checked load balancing
+story:
+  takeaway: A load balancer stops routing to a backend that fails its health checks
+nodes:
+  client: { label: Client }
+  lb:     { label: Load balancer }
+  a:      { label: Server A }
+  b:      { label: Server B, state: health }
+edges:
+  req:    { from: client, to: lb }
+  to_a:   { from: lb, to: a }
+  from_a: { from: a, to: lb }
+  to_b:   { from: lb, to: b }
+  from_b: { from: b, to: lb }
+  resp:   { from: lb, to: client }
+states:
+  health:
+    values: [HEALTHY, UNHEALTHY]
+    tones: { HEALTHY: ok, UNHEALTHY: fail }
+phases:
+  - name: Round robin
+    caption: requests alternate between both servers
+    set: { health: HEALTHY }
+    flows:
+      - { path: [req, to_a, from_a, resp], outcome: ok, rate: 0.8/s }
+      - { path: [req, to_b, from_b, resp], outcome: ok, rate: 0.8/s }
+  - name: Server B fails
+    caption: its requests start returning errors
+    flows:
+      - { path: [req, to_a, from_a, resp], outcome: ok, rate: 0.8/s }
+      - { path: [req, to_b, from_b, resp], outcome: fail, rate: 0.8/s }
+  - name: Marked unhealthy
+    caption: health checks fail, so all traffic goes to A
+    set: { health: UNHEALTHY }
+    flows:
+      - { path: [req, to_a, from_a, resp], outcome: ok, rate: 1.6/s }
+  - name: Recovered
+    caption: B passes its checks and rejoins the pool
+    set: { health: HEALTHY }
+    flows:
+      - { path: [req, to_a, from_a, resp], outcome: ok, rate: 0.8/s }
+      - { path: [req, to_b, from_b, resp], outcome: ok, rate: 0.8/s }
