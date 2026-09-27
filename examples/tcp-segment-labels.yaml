@@ -1,0 +1,28 @@
+# Fixture: per-message token labels (label / reply_label) on shared lines.
+title: TCP handshake
+story: { takeaway: Three segments sync both sides before data flows }
+nodes:
+  c: { label: Client, state: cs }
+  s: { label: Server, state: ss }
+edges:
+  c2s: { from: c, to: s }
+  s2c: { from: s, to: c }
+states:
+  cs: [CLOSED, SYN_SENT, ESTABLISHED]
+  ss: [LISTEN, SYN_RCVD, ESTABLISHED]
+phases:
+  - name: SYN
+    set: { cs: SYN_SENT, ss: LISTEN }
+    flows: [{ path: [c2s], outcome: ok, count: 1, label: "SYN seq=x" }]
+  - name: SYN-ACK
+    set: { ss: SYN_RCVD }
+    flows: [{ path: [s2c], outcome: ok, count: 1, label: "SYN-ACK ack=x+1" }]
+  - name: ACK
+    set: { cs: ESTABLISHED }
+    flows: [{ path: [c2s], outcome: ok, count: 1, label: "ACK ack=y+1" }]
+  - name: Data
+    set: { ss: ESTABLISHED }
+    flows: [{ path: [c2s, s2c], outcome: ok, rate: 1/s, label: GET, reply_label: "200" }]
+  - name: Closed
+    set: { cs: SYN_SENT, ss: LISTEN }
+    duration: 1s

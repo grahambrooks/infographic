@@ -75,11 +75,11 @@ phases:
     caption: its replies come back as errors
     ramp: { errors: 0..3 }              # one step per token arriving back at the counter's node
     flows:
-      - { path: [req, to_b, from_b, resp], outcome: fail, rate: 1/s }
+      - { path: [req, to_b, from_b, resp], outcome: fail, rate: 1/s, label: GET, reply_label: "503" }
   - name: Marked unhealthy
     caption: traffic is routed to A only
     set: { health: UNHEALTHY }
-    timer: { node: b, label: next check }   # shrinking bar for the phase; a node can have one per phase, each with its own label
+    timer: { node: b, label: next check, seconds: 2s }   # runs 2s (default: whole phase); one per phase per node
     flows:
       - { path: [req, to_a, from_a, resp], outcome: ok, rate: 1.6/s }
   - name: Recovered                     # last phase restores phase 1's values,
@@ -102,9 +102,18 @@ This example is complete and passes the gate (a test builds it). `examples/` hol
   `[call, response]` where `response` leaves the node `call` reached.
 - `fallback` (amber) is for a degraded answer that isn't the real result.
 - Give `rate` (a steady stream) or `count` (exactly n tokens), never both.
+- `label` travels beside each token on its outbound legs, and `reply_label`
+  on its return legs. Use them to tell different messages apart on the same
+  line: `SYN`, `SYN-ACK`, `GET` / `200`, `publish` / `ack`. Keep them to a
+  few characters.
+- `delay: 2s` holds a flow's first token back after the phase starts. Pair it
+  with `timer: { label: backoff 2s, seconds: 2s }` to show "wait, then act"
+  at true scale. The expired timer stays on screen, empty, for the rest of
+  the phase.
 
-**Timing** is derived from the flows and caption length. Leave out
-`duration`, unless a phase has to be held longer.
+**Timing** is derived from the flows, delays, timers and caption length.
+Leave out `duration`, unless a phase has to be held longer. Times may be
+written `2`, `2s` or `500ms`.
 
 - A `rate` phase lasts at least 5s. It spawns tokens for about 3s, then lets
   them finish, so `rate` sets how dense the stream looks.

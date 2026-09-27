@@ -106,8 +106,8 @@ pub struct CounterSpec {
 pub struct PhaseSpec {
     pub name: String,
     pub caption: Option<String>,
-    /// Seconds. Derived from the flows and caption length when absent.
-    pub duration: Option<f64>,
+    /// Derived from the flows and caption length when absent.
+    pub duration: Option<Seconds>,
     #[serde(default)]
     pub set: IndexMap<String, SetValue>,
     #[serde(default)]
@@ -132,6 +132,12 @@ pub struct FlowSpec {
     pub outcome: Outcome,
     pub rate: Option<Rate>,
     pub count: Option<u32>,
+    /// Wait this long after the phase starts before the first token ("back off, then retry").
+    pub delay: Option<Seconds>,
+    /// Shown beside each token on its outbound legs, e.g. `SYN` or `GET /orders`.
+    pub label: Option<String>,
+    /// Shown on the return legs instead of `label`, e.g. `SYN-ACK` or `200 OK`.
+    pub reply_label: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -160,6 +166,31 @@ impl Outcome {
     }
 }
 
+/// A time, written `2`, `2s`, `1.5 s` or `500ms`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum Seconds {
+    Number(f64),
+    Text(String),
+}
+
+impl Seconds {
+    /// The value in seconds, if it parses and is finite and not negative.
+    pub fn get(&self) -> Option<f64> {
+        let v = match self {
+            Seconds::Number(n) => *n,
+            Seconds::Text(s) => {
+                let s = s.trim();
+                match s.strip_suffix("ms") {
+                    Some(ms) => ms.trim().parse::<f64>().ok()? / 1000.0,
+                    None => s.trim_end_matches('s').trim().parse().ok()?,
+                }
+            }
+        };
+        (v >= 0.0 && v.is_finite()).then_some(v)
+    }
+}
+
 /// Tokens per second, written `2/s` or `2`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
@@ -184,6 +215,8 @@ pub struct TimerSpec {
     /// Defaults to the first node that shows a state.
     pub node: Option<String>,
     pub label: String,
+    /// How long the bar runs. Defaults to the whole phase.
+    pub seconds: Option<Seconds>,
 }
 
 pub fn parse(yaml: &str) -> Result<Spec, String> {
@@ -344,14 +377,32 @@ impl Spec {
             if p.flows.is_empty() && p.set.is_empty() && p.ramp.is_empty() && p.timer.is_none() {
                 err(&mut f, target.clone(), "phase changes nothing".into());
             }
-            if let Some(d) = p.duration
-                && !(d > 0.0 && d.is_finite())
+            let positive =
+                |v: &Option<Seconds>| v.as_ref().is_none_or(|x| x.get().is_some_and(|s| s > 0.0));
+            if !positive(&p.duration) {
+                err(
+                    &mut f,
+                    target.clone(),
+                    "duration must be a positive time, e.g. `4` or `4s`".into(),
+                );
+            }
+            if let Some(t) = &p.timer
+                && !positive(&t.seconds)
             {
                 err(
                     &mut f,
                     target.clone(),
-                    "duration must be a positive number of seconds".into(),
+                    "timer seconds must be a positive time, e.g. `2s`".into(),
                 );
+            }
+            for (j, flow) in p.flows.iter().enumerate() {
+                if flow.delay.as_ref().is_some_and(|d| d.get().is_none()) {
+                    err(
+                        &mut f,
+                        format!("{target} flow {}", j + 1),
+                        "delay must be a time, e.g. `1s`".into(),
+                    );
+                }
             }
             for (k, v) in &p.set {
                 match (self.states.get(k), self.counters.contains_key(k), v) {
@@ -505,6 +556,16 @@ phases:
     fn unknown_fields_are_rejected() {
         let y = MINIMAL.replace("title: T", "title: T\ncolour: red");
         assert!(parse(&y).is_err());
+    }
+
+    #[test]
+    fn seconds_parse_with_and_without_units() {
+        assert_eq!(Seconds::Number(2.0).get(), Some(2.0));
+        assert_eq!(Seconds::Text("2s".into()).get(), Some(2.0));
+        assert_eq!(Seconds::Text("1.5 s".into()).get(), Some(1.5));
+        assert_eq!(Seconds::Text("500ms".into()).get(), Some(0.5));
+        assert_eq!(Seconds::Text("soon".into()).get(), None);
+        assert_eq!(Seconds::Number(-1.0).get(), None);
     }
 
     #[test]

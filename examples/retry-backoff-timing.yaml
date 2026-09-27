@@ -1,0 +1,27 @@
+# Fixture: waits inside a phase (flow delay, timer seconds).
+title: Retry with backoff
+nodes:
+  c: { label: Client }
+  v: { label: Service, state: h }
+edges:
+  go: { from: c, to: v }
+  back: { from: v, to: c }
+states:
+  h: { values: [DOWN, UP], tones: { DOWN: fail, UP: ok } }
+phases:
+  - name: Call fails
+    set: { h: DOWN }
+    flows: [{ path: [go, back], outcome: fail, count: 1 }]
+  - name: Wait 1s, retry
+    timer: { node: c, label: backoff 1s, seconds: 1s }
+    flows: [{ path: [go, back], outcome: fail, count: 1, delay: 1s }]
+  - name: Wait 2s, retry
+    timer: { node: c, label: backoff 2s, seconds: 2s }
+    flows: [{ path: [go, back], outcome: fail, count: 1, delay: 2s }]
+  - name: Wait 4s, retry
+    set: { h: UP }
+    timer: { node: c, label: backoff 4s, seconds: 4s }
+    flows: [{ path: [go, back], outcome: ok, count: 1, delay: 4s }]
+  - name: Reset
+    set: { h: DOWN }
+    duration: 1

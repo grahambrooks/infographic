@@ -119,6 +119,9 @@ pub struct Edge {
     pub start: (f64, f64),
     pub end: (f64, f64),
     pub head: [(f64, f64); 3],
+    /// Where a moving token's label sits relative to the token: `(dx, baseline dy)`,
+    /// on the outward side of the edge so paired lanes' labels don't collide.
+    pub token_label_offset: (f64, f64),
     pub label: Option<Text>,
 }
 
@@ -173,7 +176,11 @@ pub struct Scene {
     pub pills: Vec<Pill>,
     pub captions: Vec<Caption>,
     pub legend: Vec<LegendItem>,
+    /// Distinct texts that travel beside tokens (flow `label` / `reply_label`).
+    pub token_labels: Vec<String>,
 }
+
+pub const TOKEN_LABEL_SIZE: f64 = 10.0;
 
 impl Scene {
     pub fn edge(&self, spec_id: &str) -> Option<&Edge> {
@@ -212,6 +219,9 @@ impl Scene {
         let mut m: BTreeMap<Weight, HashSet<char>> = BTreeMap::new();
         for t in self.texts() {
             m.entry(t.weight).or_default().extend(t.content.chars());
+        }
+        for l in &self.token_labels {
+            m.entry(Weight::SemiBold).or_default().extend(l.chars());
         }
         m
     }
@@ -836,6 +846,17 @@ pub fn layout(spec: &Spec, fonts: &Fonts) -> (Scene, Vec<Finding>) {
             (end.0 - n2.0 * ARROW_W, end.1 - n2.1 * ARROW_W),
         ];
         let eid = format!("e-{}", id_part(sid));
+        // Outward from the pair: the lane's side of the shared centre line.
+        let side = if off == 0.0 { 1.0 } else { off.signum() };
+        let out = (normal.0 * side, normal.1 * side);
+        let token_label_offset = (
+            out.0 * 9.0,
+            if out.1 < 0.0 {
+                -(TOKEN_R + 4.0)
+            } else {
+                TOKEN_R + 4.0 + fonts.cap_height(TOKEN_LABEL_SIZE, Weight::SemiBold)
+            },
+        );
         let label = e.label.as_deref().map(|l| {
             let mut t = tm.make(
                 format!("{eid}--label"),
@@ -846,9 +867,6 @@ pub fn layout(spec: &Spec, fonts: &Fonts) -> (Scene, Vec<Finding>) {
                 None,
             );
             let mid = ((start.0 + end.0) / 2.0, (start.1 + end.1) / 2.0);
-            // Outward from the pair: the lane's side of the shared centre line.
-            let side = if off == 0.0 { 1.0 } else { off.signum() };
-            let out = (normal.0 * side, normal.1 * side);
             t.anchor = Anchor::Middle;
             t.x = mid.0 + out.0 * 8.0;
             t.y = if out.1 < 0.0 {
@@ -866,8 +884,18 @@ pub fn layout(spec: &Spec, fonts: &Fonts) -> (Scene, Vec<Finding>) {
             start,
             end,
             head,
+            token_label_offset,
             label,
         });
+    }
+
+    let mut token_labels: Vec<String> = Vec::new();
+    for f in spec.phases.iter().flat_map(|p| &p.flows) {
+        for l in [&f.label, &f.reply_label].into_iter().flatten() {
+            if !token_labels.contains(l) {
+                token_labels.push(l.clone());
+            }
+        }
     }
 
     // --- caption row and legend ---
@@ -911,6 +939,7 @@ pub fn layout(spec: &Spec, fonts: &Fonts) -> (Scene, Vec<Finding>) {
             pills,
             captions,
             legend,
+            token_labels,
         },
         findings,
     )

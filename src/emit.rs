@@ -4,7 +4,8 @@
 use std::fmt::Write;
 
 use crate::font::FAMILY;
-use crate::layout::{Anchor, Scene, TOKEN_R, Text};
+use crate::layout::{Anchor, Scene, TOKEN_LABEL_SIZE, TOKEN_R, Text};
+use crate::theme::Ink;
 use crate::theme::Theme;
 use crate::timeline::{Segment, Timeline};
 
@@ -159,18 +160,47 @@ impl Emitter<'_> {
         let Some((attr, anim)) = self.vis(&s.id) else {
             return;
         };
+        let stroke = th.background;
+        // A labelled token is a group, so the dot and its label move as one.
+        // Unlabelled tokens stay a bare circle.
+        let (dot_id, label) = match &s.label {
+            Some(l) => (format!("{}-dot", s.id), Some(l)),
+            None => (s.id.clone(), None),
+        };
+        let label_text = |x: f64, y: f64| {
+            let Some(l) = label else { return String::new() };
+            if !self.o.text {
+                return String::new();
+            }
+            let ink = s.tone.map_or(th.accent, |t| th.ink(Ink::ToneText(t)));
+            format!(
+                r#"<text id="{}-label" data-role="token-label" x="{}" y="{}" font-family="'{FAMILY}', sans-serif" font-size="{TOKEN_LABEL_SIZE}" font-weight="600" fill="{ink}" text-anchor="middle">{}</text>"#,
+                s.id,
+                n(x),
+                n(y),
+                esc(l)
+            )
+        };
+        let (dx, dy) = edge.token_label_offset;
         match self.o.mode {
             Mode::Frame(t) => {
                 let (x, y) = edge.point_at((t - s.t0) / (s.t1 - s.t0));
-                writeln!(
-                    self.out,
-                    r#"<circle id="{}" data-role="token" cx="{}" cy="{}" r="{TOKEN_R}" fill="{fill}" stroke="{}" stroke-width="1.5"/>"#,
-                    s.id,
+                let dot = format!(
+                    r#"<circle id="{dot_id}" data-role="token" cx="{}" cy="{}" r="{TOKEN_R}" fill="{fill}" stroke="{stroke}" stroke-width="1.5"/>"#,
                     n(x),
                     n(y),
-                    th.background
-                )
-                .unwrap();
+                );
+                if label.is_some() {
+                    writeln!(
+                        self.out,
+                        r#"<g id="{}">{dot}{}</g>"#,
+                        s.id,
+                        label_text(x + dx, y + dy)
+                    )
+                    .unwrap();
+                } else {
+                    writeln!(self.out, "{dot}").unwrap();
+                }
             }
             Mode::Animated => {
                 let cycle = self.tl.cycle;
@@ -190,17 +220,28 @@ impl Emitter<'_> {
                     times.push(1.0);
                     points.push(1.0);
                 }
-                writeln!(
-                    self.out,
-                    r##"<circle id="{}" data-role="token" r="{TOKEN_R}" fill="{fill}" stroke="{}" stroke-width="1.5"{attr}>{anim}<animateMotion dur="{}s" repeatCount="indefinite" calcMode="linear" keyTimes="{}" keyPoints="{}"><mpath href="#{}"/></animateMotion></circle>"##,
-                    s.id,
-                    th.background,
+                let motion = format!(
+                    r##"<animateMotion dur="{}s" repeatCount="indefinite" calcMode="linear" keyTimes="{}" keyPoints="{}"><mpath href="#{}"/></animateMotion>"##,
                     n(cycle),
                     join(&times),
                     join(&points),
                     edge.id
-                )
-                .unwrap();
+                );
+                if label.is_some() {
+                    writeln!(
+                        self.out,
+                        r#"<g id="{}"{attr}>{anim}{motion}<circle id="{dot_id}" data-role="token" r="{TOKEN_R}" fill="{fill}" stroke="{stroke}" stroke-width="1.5"/>{}</g>"#,
+                        s.id,
+                        label_text(dx, dy)
+                    )
+                    .unwrap();
+                } else {
+                    writeln!(
+                        self.out,
+                        r#"<circle id="{dot_id}" data-role="token" r="{TOKEN_R}" fill="{fill}" stroke="{stroke}" stroke-width="1.5"{attr}>{anim}{motion}</circle>"#,
+                    )
+                    .unwrap();
+                }
             }
         }
     }
@@ -336,7 +377,9 @@ impl Emitter<'_> {
                 .unwrap();
                 let shrink = self.tl.shrinks.iter().find(|x| x.id == tm.bar_id);
                 let (width, anim) = match (self.o.mode, shrink) {
-                    (Mode::Frame(t), Some(sh)) if t >= sh.t0 && t < sh.t1 => {
+                    // Expired within its phase: an empty bar (the group is hidden outside the phase).
+                    (Mode::Frame(t), Some(sh)) if t >= sh.t1 => (0.0, String::new()),
+                    (Mode::Frame(t), Some(sh)) if t >= sh.t0 => {
                         (tr.w * (1.0 - (t - sh.t0) / (sh.t1 - sh.t0)), String::new())
                     }
                     (Mode::Animated, Some(sh)) => {

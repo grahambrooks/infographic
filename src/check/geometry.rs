@@ -182,8 +182,19 @@ pub fn geometry(svg: &str, opt: &usvg::Options, frame: Option<&str>) -> Result<V
             }
         }
     }
-    for (i, a) in ts.iter().enumerate() {
-        for b in &ts[i + 1..] {
+    // Labels riding on tokens move, so passing over other text is not a layout
+    // defect; they still count for bounds and contrast.
+    let moving: std::collections::HashSet<&str> = doc
+        .descendants()
+        .filter(|n| n.attribute("data-role") == Some("token-label"))
+        .filter_map(|n| n.attribute("id"))
+        .collect();
+    let fixed: Vec<&TextInfo> = ts
+        .iter()
+        .filter(|t| !moving.contains(t.id.as_str()))
+        .collect();
+    for (i, a) in fixed.iter().enumerate() {
+        for b in &fixed[i + 1..] {
             if a.bbox.overlap_area(&b.bbox) > 1.0 {
                 f.push(mark(Finding::error(
                     "geometry.overlap",
@@ -268,7 +279,10 @@ pub fn geometry(svg: &str, opt: &usvg::Options, frame: Option<&str>) -> Result<V
         }
     }
     // Free-standing text (edge labels, captions) must not sit on any line.
-    for t in ts.iter().filter(|t| !container.contains_key(t.id.as_str())) {
+    for t in fixed
+        .iter()
+        .filter(|t| !container.contains_key(t.id.as_str()))
+    {
         for l in &lines {
             if crosses(l, &t.bbox, 0.75) {
                 f.push(mark(Finding::warning(

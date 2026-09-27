@@ -38,6 +38,8 @@ pub struct Segment {
     pub t1: f64,
     /// `None` on the outbound (request) leg; the outcome's tone on the way back.
     pub tone: Option<Tone>,
+    /// Text that travels beside the token, e.g. `SYN`.
+    pub label: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -196,6 +198,9 @@ pub fn schedule(spec: &Spec, scene: &Scene) -> (Timeline, Vec<Finding>) {
             count: Option<u32>,
             spacing: f64,
             tone: Tone,
+            delay: f64,
+            label: Option<&'a str>,
+            reply_label: Option<&'a str>,
         }
         let ramps: Vec<(String, &str, i64, i64)> = p
             .ramp
@@ -236,6 +241,9 @@ pub fn schedule(spec: &Spec, scene: &Scene) -> (Timeline, Vec<Finding>) {
                 count: f.count.or(ramp_count),
                 spacing: 1.0 / rate.unwrap_or(DEFAULT_RATE),
                 tone: f.outcome.tone(),
+                delay: f.delay.as_ref().and_then(|d| d.get()).unwrap_or(0.0),
+                label: f.label.as_deref(),
+                reply_label: f.reply_label.as_deref(),
             });
         }
 
@@ -246,7 +254,7 @@ pub fn schedule(spec: &Spec, scene: &Scene) -> (Timeline, Vec<Finding>) {
         let read = 1.5 + 0.3 * words as f64;
         // Concurrent flows interleave instead of moving in lockstep.
         let n_flows = plans.len().max(1) as f64;
-        let lead = |fi: usize, pl: &Plan| LEAD + fi as f64 * pl.spacing / n_flows;
+        let lead = |fi: usize, pl: &Plan| LEAD + pl.delay + fi as f64 * pl.spacing / n_flows;
         let needed = plans
             .iter()
             .enumerate()
@@ -254,10 +262,16 @@ pub fn schedule(spec: &Spec, scene: &Scene) -> (Timeline, Vec<Finding>) {
                 Some(c) => {
                     lead(fi, pl) + (c.saturating_sub(1)) as f64 * pl.spacing + pl.travel + TAIL
                 }
-                None => (LEAD + RATE_WINDOW + pl.travel + TAIL).max(RATE_PHASE),
+                None => (lead(fi, pl) + RATE_WINDOW + pl.travel + TAIL).max(RATE_PHASE),
             })
             .fold(0.0, f64::max);
-        let duration = match p.duration {
+        let timer_secs = p
+            .timer
+            .as_ref()
+            .and_then(|t| t.seconds.as_ref())
+            .and_then(|s| s.get());
+        let needed = needed.max(timer_secs.map_or(0.0, |s| s + TAIL));
+        let duration = match p.duration.as_ref().and_then(|d| d.get()) {
             Some(d) => {
                 if d + 1e-9 < needed {
                     findings.push(Finding::warning(
@@ -306,6 +320,12 @@ pub fn schedule(spec: &Spec, scene: &Scene) -> (Timeline, Vec<Finding>) {
                         t0: ts,
                         t1,
                         tone: ret.then_some(pl.tone),
+                        label: if *ret {
+                            pl.reply_label.or(pl.label)
+                        } else {
+                            pl.label
+                        }
+                        .map(str::to_string),
                     });
                     if *ret {
                         arrivals.push((e.to_node.clone(), t1));
@@ -361,11 +381,14 @@ pub fn schedule(spec: &Spec, scene: &Scene) -> (Timeline, Vec<Finding>) {
             .and_then(|n| scene.node(n))
             && let Some(tm) = node.timers.iter().find(|tm| tm.phase == n)
         {
+            // A timer with `seconds` runs for that long, then stays empty for the
+            // rest of the phase, so the phase's frame can show the wait that just ended.
+            let stop = timer_secs.map_or(end, |s| (start + s).min(end));
             tl.show(tm.id.clone(), start, end);
             tl.shrinks.push(Shrink {
                 id: tm.bar_id.clone(),
                 t0: start,
-                t1: end,
+                t1: stop,
             });
         }
         tl.phases.push(Span {
@@ -562,6 +585,58 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn schedule_example(file: &str) -> (Scene, Timeline) {
+        let s = spec::parse(&std::fs::read_to_string(file).unwrap()).unwrap();
+        let fonts = Fonts::new();
+        let (scene, _) = layout::layout(&s, &fonts);
+        let (tl, f) = schedule(&s, &scene);
+        assert!(f.is_empty(), "{f:?}");
+        (scene, tl)
+    }
+
+    #[test]
+    fn delay_holds_tokens_back_and_timers_run_for_their_seconds() {
+        let (_, tl) = schedule_example("examples/retry-backoff-timing.yaml");
+        for (phase, wait) in [(1, 1.0), (2, 2.0), (3, 4.0)] {
+            let span = &tl.phases[phase];
+            let first = tl
+                .segments
+                .iter()
+                .filter(|s| s.t0 >= span.start && s.t0 < span.end)
+                .map(|s| s.t0)
+                .fold(f64::MAX, f64::min);
+            assert!(
+                first >= span.start + wait,
+                "phase {} sends at {first} before its {wait}s wait",
+                phase + 1
+            );
+            let bar = tl.shrinks.iter().find(|s| s.t0 == span.start).unwrap();
+            assert!(
+                (bar.t1 - bar.t0 - wait).abs() < 1e-9,
+                "phase {} timer runs {}s",
+                phase + 1,
+                bar.t1 - bar.t0
+            );
+        }
+    }
+
+    #[test]
+    fn labels_ride_on_their_legs() {
+        let (_, tl) = schedule_example("examples/tcp-segment-labels.yaml");
+        let labels = |edge: &str| {
+            let mut v: Vec<&str> = tl
+                .segments
+                .iter()
+                .filter(|s| s.edge == edge)
+                .filter_map(|s| s.label.as_deref())
+                .collect();
+            v.dedup();
+            v
+        };
+        assert_eq!(labels("e-c2s"), ["SYN seq=x", "ACK ack=y+1", "GET"]);
+        assert_eq!(labels("e-s2c"), ["SYN-ACK ack=x+1", "200"]);
     }
 
     #[test]
