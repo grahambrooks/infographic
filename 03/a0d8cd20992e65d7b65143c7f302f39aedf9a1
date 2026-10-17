@@ -1,0 +1,23 @@
+.claude/skills/infographic/SKILL.md
+  s_d70ec1fc362b35::t_017b3aebdd5c64 50-51
+src/layout.rs
+  s_d70ec1fc362b35::t_85a71c36fafe1f 304-305,338-339,342-344,961-976
+src/spec.rs
+  s_d70ec1fc362b35::t_d5a8d3cb105b7e 51-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "03a0d8cd20992e65d7b65143c7f302f39aedf9a1",
+  "prompts": {},
+  "sessions": {
+    "s_d70ec1fc362b35": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd012d9d-1174-4b1b-94e3-0475beffca5b",
+        "model": "unknown"
+      },
+      "human_author": "Graham Brooks <graham@grahambrooks.com>"
+    }
+  }
+}
