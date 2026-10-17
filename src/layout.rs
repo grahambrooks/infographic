@@ -301,7 +301,8 @@ pub fn counter_values(spec: &Spec, counter: &str) -> BTreeSet<i64> {
 }
 
 /// Layered ranks: back edges (found by DFS in declaration order) are ignored,
-/// then each node sits one rank after its furthest predecessor.
+/// then each node sits one rank after its furthest predecessor. A node with
+/// a `rank` in the spec stays in that column.
 pub fn ranks(spec: &Spec) -> IndexMap<String, usize> {
     let ids: Vec<&str> = spec.nodes.keys().map(String::as_str).collect();
     let idx = |id: &str| ids.iter().position(|n| *n == id);
@@ -334,10 +335,13 @@ pub fn ranks(spec: &Spec) -> IndexMap<String, usize> {
             dfs(u, &adj, &mut mark, &mut forward);
         }
     }
-    let mut rank = vec![0usize; n];
+    let pinned: Vec<Option<usize>> = ids.iter().map(|id| spec.nodes[*id].rank).collect();
+    let mut rank: Vec<usize> = pinned.iter().map(|p| p.unwrap_or(0)).collect();
     for _ in 0..n {
         for &(u, v) in &forward {
-            rank[v] = rank[v].max(rank[u] + 1);
+            if pinned[v].is_none() {
+                rank[v] = rank[v].max(rank[u] + 1);
+            }
         }
     }
     ids.iter()
@@ -952,6 +956,22 @@ mod tests {
 
     fn breaker() -> Spec {
         spec::parse(include_str!("../examples/circuit-breaker.yaml")).unwrap()
+    }
+
+    #[test]
+    fn pinned_ranks_keep_peers_together() {
+        let peers = |pin: &str| {
+            spec::parse(&format!(
+                "title: t\nstory: {{ takeaway: t }}\nnodes:\n  a: {{ label: A }}\n  b: {{ label: B{pin} }}\n  s: {{ label: S }}\n  t: {{ label: T }}\nedges:\n  a1: {{ from: a, to: s }}\n  a2: {{ from: s, to: a }}\n  b1: {{ from: b, to: s }}\n  b2: {{ from: s, to: b }}\n  st: {{ from: s, to: t }}\nphases:\n  - name: P\n    caption: c\n    flows:\n      - {{ path: [a1, a2], outcome: ok, count: 1 }}\n"
+            ))
+            .unwrap()
+        };
+        // Unpinned, walking a -> s reaches b through s: b lands beside t.
+        let r = ranks(&peers(""));
+        assert_eq!((r["a"], r["s"], r["b"], r["t"]), (0, 1, 2, 2));
+        // Pinned, b stays with a, and the rest are ranked as before.
+        let r = ranks(&peers(", rank: 0"));
+        assert_eq!((r["a"], r["s"], r["b"], r["t"]), (0, 1, 0, 2));
     }
 
     #[test]

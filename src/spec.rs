@@ -48,6 +48,12 @@ pub struct NodeSpec {
     pub sublabel: Option<String>,
     pub state: Option<String>,
     pub counter: Option<String>,
+    /// Pins the node to this column (0 is the left). The others are still
+    /// ranked from the edges, after any pinned predecessor. For peers the
+    /// edges alone would split, such as two clients of one server, where
+    /// walking the edges reaches the second client through the server.
+    #[serde(default)]
+    pub rank: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]

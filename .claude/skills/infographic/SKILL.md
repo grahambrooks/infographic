@@ -47,7 +47,8 @@ story:
   takeaway: A load balancer stops routing to a backend that fails its health checks
   notes: Health checks are implied, not drawn.   # optional: simplifications you made
 nodes:                                  # left-to-right order comes from the edges;
-  client: { label: Client }             # nodes in the same rank stack vertically
+  client: { label: Client }             # nodes in the same rank stack vertically;
+                                        # `rank: 0` pins a node's column (e.g. a second client)
   lb:     { label: Load balancer, counter: errors }
   a:      { label: Server A }
   b:      { label: Server B, state: health, sublabel: optional second line }
