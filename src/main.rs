@@ -45,6 +45,8 @@ enum Command {
         #[arg(long)]
         png: Option<PathBuf>,
     },
+    /// Print the licenses of this tool and of the IBM Plex Sans font built into it.
+    Licenses,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -56,6 +58,14 @@ enum ProfileArg {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let report = match &cli.command {
+        Command::Licenses => {
+            print!(
+                "{}\n\n{}",
+                include_str!("../LICENSE"),
+                include_str!("../assets/fonts/OFL.txt")
+            );
+            return ExitCode::SUCCESS;
+        }
         Command::Build {
             spec,
             out_dir,

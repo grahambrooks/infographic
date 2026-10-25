@@ -2,6 +2,15 @@
 name = "infographic"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.99.0"
+description = "Claude Code skill and Rust CLI for verified, animated SVG infographics"
+repository = "https://github.com/grahambrooks/infographic"
+readme = "README.md"
+# The CLI is MIT; IBM Plex Sans, compiled into the binary, is OFL-1.1.
+license = "MIT AND OFL-1.1"
+keywords = ["svg", "infographic", "animation", "diagram", "claude"]
+categories = ["command-line-utilities", "visualization"]
+exclude = ["/infographics", "/spikes", "/.claude", "/.github"]
 
 [dependencies]
 anyhow = "1.0.104"

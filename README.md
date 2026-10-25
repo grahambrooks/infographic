@@ -20,9 +20,28 @@ against the spec. Claude fixes them in the spec, never in the SVG.
 
 ## Install
 
+The CLI is a single binary for macOS and Linux (arm64 and x86-64).
+
+**Homebrew:**
+
 ```bash
-cargo install --path .
+brew tap grahambrooks/infographic https://github.com/grahambrooks/infographic
+brew install grahambrooks/infographic/infographic
 ```
+
+**Download:** take the archive for your platform from the
+[latest release](https://github.com/grahambrooks/infographic/releases/latest),
+check it against `SHA256SUMS`, and put `infographic` on your `PATH`.
+
+**From source** (Rust 1.99 or later):
+
+```bash
+cargo install --git https://github.com/grahambrooks/infographic
+```
+
+**The skill:** copy [`.claude/skills/infographic/`](.claude/skills/infographic/)
+into `~/.claude/skills/` to use it in any project, or work inside a clone of
+this repository, where Claude Code picks it up automatically.
 
 ## Use
 
@@ -66,3 +85,10 @@ Each build also writes a storyboard: one frame per phase, light and dark. Here
 is the [circuit breaker's](infographics/circuit-breaker.storyboard.png).
 
 See [`docs/design.md`](docs/design.md) for the design and milestones.
+
+## License
+
+MIT, see [`LICENSE`](LICENSE). The binary includes
+[IBM Plex Sans](https://github.com/IBM/plex) under the SIL Open Font License
+1.1 ([`assets/fonts/OFL.txt`](assets/fonts/OFL.txt)); `infographic licenses`
+prints both.

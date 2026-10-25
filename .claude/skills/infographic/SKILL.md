@@ -15,9 +15,11 @@ afterwards.
 
 ## 0. Tool
 
-Run `infographic --version`. If it isn't found, install it from this
-repository (the directory three levels above this file) with
-`cargo install --path <repo>`.
+Run `infographic --version`. If it isn't found, install it: with Homebrew,
+`brew tap grahambrooks/infographic https://github.com/grahambrooks/infographic && brew install grahambrooks/infographic/infographic`;
+otherwise download a binary from
+<https://github.com/grahambrooks/infographic/releases/latest>, or, with Rust
+installed, `cargo install --git https://github.com/grahambrooks/infographic`.
 
 ## 1. Story
 

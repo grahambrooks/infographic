@@ -46,7 +46,7 @@ cd spikes/embedding-modes && npm install && node verify.mjs <dir> <slug>
 `verify.mjs` checks playback inside `<img>`. It also seeks Chromium, Firefox
 and WebKit to each storyboard frame's time, and asserts that the browser shows
 exactly the elements the timeline says, with tokens within 1.5px. It has been
-confirmed to fail on tampered output. Playwright is pinned to 1.56.1 to match
+confirmed to fail on tampered output. Playwright is pinned (`spikes/embedding-modes/package.json`) to match
 the browser builds cached in `~/Library/Caches/ms-playwright`.
 
 ## Architecture

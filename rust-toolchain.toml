@@ -1,0 +1,4 @@
+# Pinned so laptop, CI and release builds share a compiler.
+[toolchain]
+channel = "1.99.0"
+components = ["rustfmt", "clippy"]
