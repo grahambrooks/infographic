@@ -1,6 +1,6 @@
 [package]
 name = "infographic"
-version = "0.1.0"
+version = "2026.10.1"
 edition = "2024"
 rust-version = "1.99.0"
 description = "Claude Code skill and Rust CLI for verified, animated SVG infographics"
