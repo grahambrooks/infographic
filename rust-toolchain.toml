@@ -1,4 +1,4 @@
-# Pinned so laptop, CI and release builds share a compiler.
 [toolchain]
-channel = "1.99.0"
+# Keep `channel` identical to `rust-version` in Cargo.toml; CI fails if they drift.
+channel = "1.99.1"
 components = ["rustfmt", "clippy"]
