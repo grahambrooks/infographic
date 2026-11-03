@@ -27,6 +27,9 @@ cargo build
 cargo test                                   # unit tests; the fixture is examples/circuit-breaker.yaml
 cargo test timeline::tests::exactly_one      # a single test, by name filter
 cargo clippy && cargo fmt
+make check                                   # the CI check job (fmt, clippy -D warnings, test); run before pushing
+make hooks                                   # install prek hooks (fast checks on commit, make check on push)
+make release-dry                             # preview the CalVer tag `make release` would push
 cargo install --path .                       # the skill expects `infographic` on PATH
 
 infographic build examples/circuit-breaker.yaml -o /tmp/out [--frames]

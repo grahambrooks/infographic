@@ -371,4 +371,3 @@ Drawn from prior art (`diagram-design`, Ciechanowski, ByteByteGo):
   clock makes it fail.
 - **Edges are straight.** An edge through a node it doesn't connect is an
   error, not silently drawn. Routing around nodes is future work.
-
