@@ -501,7 +501,7 @@ dependencies = [
 
 [[package]]
 name = "infographic"
-version = "2026.11.3"
+version = "2026.11.7"
 dependencies = [
  "anyhow",
  "base64",
