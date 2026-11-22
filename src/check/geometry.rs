@@ -153,9 +153,8 @@ pub fn geometry(svg: &str, opt: &usvg::Options, frame: Option<&str>) -> Result<V
         }
         if let Some(c) = container.get(t.id.as_str()) {
             match tree.node_by_id(c) {
-                Some(cn) => {
-                    let cb = B::of(cn.abs_bounding_box());
-                    if !cb.contains(&t.bbox) {
+                Some(cn) => match cn.abs_bounding_box().map(B::of) {
+                    Some(cb) if !cb.contains(&t.bbox) => {
                         f.push(mark(Finding::error(
                             "geometry.overflow",
                             what.clone(),
@@ -173,7 +172,13 @@ pub fn geometry(svg: &str, opt: &usvg::Options, frame: Option<&str>) -> Result<V
                             ),
                         )));
                     }
-                }
+                    Some(_) => {}
+                    None => f.push(mark(Finding::error(
+                        "geometry.overflow",
+                        what.clone(),
+                        format!("container #{c} is empty, so it has no box to hold the text"),
+                    ))),
+                },
                 None => f.push(mark(Finding::error(
                     "geometry.overflow",
                     what.clone(),
@@ -210,7 +215,7 @@ pub fn geometry(svg: &str, opt: &usvg::Options, frame: Option<&str>) -> Result<V
     let boxes = |r: &str| -> Vec<(String, B)> {
         all.iter()
             .filter(|n| !n.id().is_empty() && !hidden.contains(n.id()) && role(n.id(), r))
-            .map(|n| (n.id().to_string(), B::of(n.abs_bounding_box())))
+            .filter_map(|n| Some((n.id().to_string(), B::of(n.abs_bounding_box()?))))
             .collect()
     };
     let nodes = boxes("node");

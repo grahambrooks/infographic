@@ -33,7 +33,7 @@ brew install grahambrooks/infographic/infographic
 [latest release](https://github.com/grahambrooks/infographic/releases/latest),
 check it against `SHA256SUMS`, and put `infographic` on your `PATH`.
 
-**From source** (Rust 1.99 or later):
+**From source** (Rust 1.100 or later):
 
 ```bash
 cargo install --git https://github.com/grahambrooks/infographic
